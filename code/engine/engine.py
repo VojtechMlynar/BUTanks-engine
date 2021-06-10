@@ -1,25 +1,34 @@
 """ BUTanks engine v0.0.2 - dev_DB branch
 
-TODO:
-- Tank class (NOT FINISHED)
-    - Tank shells
-    - Collision detection between tanks
-    - Collision between shell and tank
-+ Light methods overhaul (Done?)
+TODO: 
+[ ] Tank class (NOT FINISHED)
+    [ ] Tank shells
+    [ ] Collision detection between tanks
+    [ ] Collision between shell and tank
+    [ ] Tank controls
+[x] Light methods overhaul
+[x] Non graphic option
+[ ] Time invariance
 """ 
 
 import os
+import time
 import math
 import pygame
 import numpy as np
 from pathlib import Path
 from pygame.locals import *
 
+# HACK non  graphic
+target_i = 10
+i = 0
+dt_fix = 0.03
+
 # CONSTANTS
 WIDTH, HEIGHT = 1000, 1000
 # WHITE = (255,255,255)
 WHITE = (100,100,100)  # Dark mode
-TARGET_FPS = 60
+TARGET_FPS = 600
 
 # WINDOW init
 pygame.init()
@@ -66,7 +75,11 @@ class Tank(pygame.sprite.Sprite):
         rot_im = pygame.transform.rotate(self.im_body, self.phi)
         im_body_rect = rot_im.get_rect()
         im_body_rect.center = self.im_body.get_rect(top=self.y, left=self.x).center
-        WIN.blit(rot_im, im_body_rect)
+        
+        # HACK non  graphic
+        if i == target_i:
+            WIN.blit(rot_im, im_body_rect)
+
         self.rect = im_body_rect
         self.mask = pygame.mask.from_surface(rot_im)
 
@@ -74,7 +87,10 @@ class Tank(pygame.sprite.Sprite):
         rot_im = pygame.transform.rotate(self.im_turret, self.phi + self.phi_rel)
         im_rect = rot_im.get_rect()
         im_rect.center = im_body_rect.center
-        WIN.blit(rot_im, im_rect)
+
+        # HACK non  graphic
+        if i == target_i:
+            WIN.blit(rot_im, im_rect)
 
     def update(self, environment, dt):
         """Class method docstring."""
@@ -110,6 +126,7 @@ class Background(pygame.sprite.Sprite):
 
 # MAIN LOOP
 def main():
+    global i
     pygame.display.set_caption("BUTanks engine")
 
     fpsClock = pygame.time.Clock()
@@ -123,7 +140,13 @@ def main():
     # GAME LOOP
     run = True
     while run:
-        dt = last_millis/1000
+        start = time.time()  # Loop time start
+
+        # HACK non  graphic
+        if target_i == 1:
+            dt = last_millis/1000
+        else:
+            dt = dt_fix
         
         # Check for window close
         for event in pygame.event.get():
@@ -133,12 +156,22 @@ def main():
         # Rendering
         WIN.fill(WHITE)
         
-        pygame.sprite.RenderPlain(arena).draw(WIN)    
+        # HACK non  graphic
+        if i == target_i:
+            pygame.sprite.RenderPlain(arena).draw(WIN)
+
         Tank_1.update(arena, dt)
         Tank_2.update(arena, dt)
-        pygame.display.update()
+
+        # HACK non  graphic
+        if i == target_i:
+            pygame.display.update()
+            i = 0
 
         last_millis = fpsClock.tick(TARGET_FPS)
+
+        print("This loop: ", time.time()-start)  # Print loop time
+        i += 1
 
     pygame.quit()
 
