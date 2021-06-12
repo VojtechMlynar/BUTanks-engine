@@ -1,24 +1,15 @@
-""" BUTanks engine v0.0.2 - dev_DB branch
+""" BUTanks engine v0.0.3 - dev_DB branch
 
-TODO: 
+TODO:
 [ ] Tank class (NOT FINISHED)
-    [x] Tank shells
-        [x] Gun cooldown
-    [x] Collision detection between tanks
-    [x] Collision between shell and tank
-    [x] Tank controls
     [ ] Health
     [ ] Destroy
     [ ] Capture time
-    [ ] Push from wall!
+    [=] Collisions refine (PARTIALLY)
 [ ] Capture area
-[x] Keyboard controls for devs
-[x] Light methods overhaul
-[x] Non graphic option
 [ ] Time invariance
-[ ] Comments
-[ ] Clean
-    [ ] Input to another file
+[=] Comments (PARTIALLY)
+[=] Clean (PARTIALLY)
 """ 
 
 import os
@@ -29,16 +20,18 @@ import numpy as np
 from pathlib import Path
 from pygame.locals import *
 
-# HACK non  graphic
-target_i = 1
-i = 0
-dt_fix = 0.03
-
 # CONSTANTS
 WIDTH, HEIGHT = 1000, 1000
-# WHITE = (255,255,255)
-WHITE = (100,100,100)  # Dark mode
+WHITE = (100,100,100)  # HACK Dark mode 
 TARGET_FPS = 60
+
+# Tank settings
+FORWARD_SPEED = 150
+BACKWARD_SPEED = 80
+TURN_SPEED = 10
+TURRET_TURN_SPEED = 10
+TSHELL_SPEED = 150
+GUN_COOLDOWN = 1
 
 # WINDOW init
 pygame.init()
@@ -51,17 +44,82 @@ MAPS_DIR = os.path.join(ASSETS_DIR,"maps")
 IMGS_DIR = os.path.join(ASSETS_DIR,"images")
 
 
+class Game():
+
+    def __init__(self):
+        self.who = 0
+        
+        # Rendering
+        self.render_all_frames = True
+        self.target_frame = 10
+        self.i_frame = 0
+        self.dt_fixed = 0.03
+        
+
+class Map(pygame.sprite.Sprite):
+    """Map class, also known as map."""
+    
+    def __init__(self, img_filename):
+        """
+        Args:
+            img_filename (string): Image filename.
+                Image must have black walls and transparent background.
+        """
+
+        super(Map, self).__init__()
+        self.x = 0
+        self.y = 0
+        self.image = pygame.image.load(os.path.join(MAPS_DIR,img_filename))
+        self.image.convert_alpha()
+        self.image = pygame.transform.scale(self.image,(WIDTH,HEIGHT))
+        self.rect = self.image.get_rect()
+        self.LOS_mask = pygame.surfarray.array2d(self.image)
+        self.mask = pygame.mask.from_surface(self.image)
+        self.switch = False
+
+
+class Tankshell(pygame.sprite.Sprite):
+    """Tank shell class."""
+
+    def __init__(self, im_tank_shell, x0, y0, phi, v):
+        
+        super(Tankshell, self).__init__()
+        self.phi = phi
+        self.x = x0
+        self.y = y0
+        self.v = v
+
+        self.image = pygame.transform.rotate(im_tank_shell, self.phi)
+        self.rect = self.image.get_rect(center = (self.x, self.y))
+
+    def update(self, dt):
+
+        self.phi = self.phi
+        self.x += self.v*math.sin(math.radians(self.phi)) *dt
+        self.y += self.v*math.cos(math.radians(self.phi)) *dt
+        self.rect = self.image.get_rect(center = (self.x, self.y))
+        self.mask = pygame.mask.from_surface(self.image)
+
+
 class Tank(pygame.sprite.Sprite):
-    """Tank class"""
+    """Tank class, main class of tank."""
 
     def __init__(self, pos0_x, pos0_y, phi0, phi_rel0, img_body, img_turret, cntrl_mode):
-        """Class method docstring."""
+        """
+        Args:
+            pos0_x (int or float): Initial coordinate of tank cennter on x axis
+            pos0_y (int or float): Initial coordinate of tank cennter on y axis
+            phi0 (int or float): Initial angle of tank
+            phi_rel0 (int or float): Initial relative angle of tank turret
+            img_body (string): Tank body asset filename
+            img_turret (string): Tank turret asset filename
+            cntrl_mode (int): Control mode: 0 = computer
+                                            1 = keybind 1 (for dev)
+                                            2 = keybind 2 (for dev)
+        """
 
         super(Tank, self).__init__()
-
-        # Control mode: 0 = computer, 1 = keyboard_1, 2 = keyboard_2
         self.control_mode = cntrl_mode
-
         # Load resources
         self.im_body = pygame.image.load(os.path.join(IMGS_DIR,img_body))
         self.im_body.convert()
@@ -70,45 +128,45 @@ class Tank(pygame.sprite.Sprite):
         self.im_tshell = pygame.image.load(os.path.join(IMGS_DIR,"tank_shell.png"))
         self.im_tshell.convert()
         self.canon_len = self.im_turret.get_height()/2
-       
-        # Initial conditions body
+        # Initial positions
         self.x = pos0_x
         self.y = pos0_y
         self.phi = phi0
-        # Initial conditions turret
         self.phi_rel = phi_rel0
-
         # Properties
-        self.FORWARD_SPEED = 60
-        self.BACKWARD_SPEED = 40
-        self.TURN_SPEED = 10
-        self.TURRET_TURN_SPEED = 10
-        self.TSHELL_SPEED = 150
-        self.GUN_COOLDOWN = 0
-
+        self.FORWARD_SPEED = FORWARD_SPEED
+        self.BACKWARD_SPEED = BACKWARD_SPEED
+        self.TURN_SPEED = TURN_SPEED
+        self.TURRET_TURN_SPEED = TURRET_TURN_SPEED
+        self.TSHELL_SPEED = TSHELL_SPEED
+        self.GUN_COOLDOWN = GUN_COOLDOWN
         # Controls
         self.phi_in = 0
         self.v_in = 0
         self.phi_rel_in = 0
         self.shoot = 0
-
         # Pseudo position memory
         self.last_x = self.x
         self.last_y = self.y
-        self.last_phi = self.phi
-
+        self.last_phi = self.phi_in
         # Memory for draw
         self.mask = None
         self.rect = None
         self.im_body_rot = None
         self.turret_rect = None
         self.im_turret_rot = None
-
-        # Shell
+        # Tank shells
         self.tshell_list = []
         self.shoot_delay = self.GUN_COOLDOWN
 
+
     def input(self, key, key_event):
+        """Handles inputs
+
+        Args:
+            key (pygame.event.key): pygame key associated with event 
+            key_event (int): 0 = KEYUP, 1 = KEYDOWN
+        """
         
         if self.control_mode == 0:
             a = 0
@@ -175,7 +233,9 @@ class Tank(pygame.sprite.Sprite):
                 elif key == pygame.K_w:
                     self.shoot = 0
 
-    def rotAssets(self):
+
+    def rotAssets(self, mode = 0):
+        """Rotates assets based on positions and updates class rectangle and mask."""
         # Base
         self.im_body_rot = pygame.transform.rotate(self.im_body, self.phi)
         self.rect = self.im_body_rot.get_rect(center = (self.x, self.y))
@@ -184,28 +244,35 @@ class Tank(pygame.sprite.Sprite):
         self.im_turret_rot = pygame.transform.rotate(self.im_turret, self.phi + self.phi_rel)
         self.turret_rect = self.im_turret_rot.get_rect(center = (self.x, self.y))
 
-    def update(self, dt):
-        """Class method docstring."""
 
-        # Save in case of collision
+    def update(self, dt):
+        """Updates class based on input.
+
+        Args:
+            dt (float): delta time for current "frame"
+        """
+
+        # Save last position in case of collision
         self.last_x = self.x
         self.last_y = self.y
         self.last_phi = self.phi
-
         # Handle shooting
         if self.shoot == 1:
             if self.shoot_delay >= self.GUN_COOLDOWN:
                 s_phi = self.phi + self.phi_rel
                 s_x0 = self.x + self.canon_len * math.sin(math.radians(s_phi))
                 s_y0 = self.y + self.canon_len * math.cos(math.radians(s_phi))
-                self.tshell_list.append(Tshell(self.im_tshell, s_x0, s_y0, s_phi, self.TSHELL_SPEED))
+                self.tshell_list.append(Tankshell(self.im_tshell, s_x0, s_y0, s_phi, self.TSHELL_SPEED))
                 self.shoot_delay = 0
-        
+        # Gun cooldown updater
         if self.shoot_delay > self.GUN_COOLDOWN:
             self.shoot_delay = self.GUN_COOLDOWN
         elif self.shoot_delay < self.GUN_COOLDOWN:
             self.shoot_delay += dt
-
+        # Update of fired shells
+        for tshell in self.tshell_list:
+            tshell.update(dt)
+        # Handle body movement
         if not self.v_in < 0:
             speed = self.FORWARD_SPEED
         else:
@@ -215,8 +282,7 @@ class Tank(pygame.sprite.Sprite):
         self.phi += self.TURN_SPEED*self.phi_in
         self.phi_rel += self.TURRET_TURN_SPEED*self.phi_rel_in
         self.rotAssets()
-        for tshell in self.tshell_list:
-            tshell.update(dt)
+        
 
     def revert(self):
         self.x = self.last_x
@@ -224,64 +290,107 @@ class Tank(pygame.sprite.Sprite):
         self.phi = self.last_phi
         self.rotAssets()
 
+    def wallCollision(self, map: Map, dt):
+        """Advaced handling of collision with wall
+
+        Args:
+            map (Map): Map class object
+            dt (float): delta time for current "frame"
+        """
+        
+        # Forced small steps
+        FORWARD_STEP = 0.5
+        BACKWARD_STEP = 0.5
+        ROT_STEP = 0.5
+        MAX_ITER = 20
+
+        # Check required movement:
+        # Check speed input
+        if self.v_in > 0:
+            translate_step = -FORWARD_STEP
+        elif self.v_in < 0:
+            translate_step = BACKWARD_STEP
+        else:
+            translate_step = 0
+        # Check rotation input
+        if self.phi_in > 0:
+            rotate_step = -ROT_STEP
+        elif self.phi_in < 0:
+            rotate_step = ROT_STEP
+        else:
+            rotate_step = 0
+        # Check simultal inputs -> More complex solution required
+        if (translate_step != 0) and (rotate_step != 0):
+            caution = 1
+        else:
+            caution = 0
+        # Save collision positions
+        x = self.x
+        y = self.y
+        phi = self.phi
+        # Iterate to non colliding position
+        for i in range(MAX_ITER):
+            self.phi += rotate_step
+            self.x += (translate_step)*math.sin(math.radians(self.phi))
+            self.y += (translate_step)*math.cos(math.radians(self.phi))
+            self.rotAssets()
+            col = pygame.sprite.collide_mask(self, map)
+            if col is None:
+                break
+        # If more complex solution is required
+        if caution == 1:
+            # Save last solution
+            x_fix = self.x
+            y_fix = self.y
+            phi_fix = self.phi
+            fix_dist = math.sqrt((abs(x-self.x))**2 + (abs(y-self.y))**2)
+            # Reset colliding positions
+            self.x = x
+            self.y = y
+            self.phi = phi
+            # Iterate to non coliding position using alternative approach
+            for i in range(MAX_ITER):
+                self.x += (translate_step)*math.sin(math.radians((self.phi_in*(-90))+(self.phi)))
+                self.y += (translate_step)*math.cos(math.radians((self.phi_in*(-90))+(self.phi)))
+                self.rotAssets()
+                col = pygame.sprite.collide_mask(self, map)
+                if col is None:
+                    break 
+            fixt_dist2 = math.sqrt((abs(x-self.x))**2 + (abs(y-self.y))**2)
+            # Compare solutions based on distance
+            if fix_dist < fixt_dist2:
+                self.x = x_fix
+                self.y = y_fix
+                self.phi = phi_fix
+                self.rotAssets()
+        # Check if collision was solved
+        col = pygame.sprite.collide_mask(self, map)
+        if col is not None:
+            self.revert()
+
     def draw(self):
-        # HACK non  graphic
-        if i == target_i:
-            WIN.blit(self.im_body_rot, self.rect)
-            for tshell in self.tshell_list:
-                WIN.blit(tshell.image, tshell.rect)
-            WIN.blit(self.im_turret_rot, self.turret_rect)
-            
+        """Draw tank and fired shells."""
 
-class Tshell(pygame.sprite.Sprite):
-
-    def __init__(self, im_tank_shell, x0, y0, phi, v):
-        
-        super(Tshell, self).__init__()
-        self.phi = phi
-        self.x = x0
-        self.y = y0
-        self.v = v
-
-        self.image = pygame.transform.rotate(im_tank_shell, self.phi)
-        self.rect = self.image.get_rect(center = (self.x, self.y))
-
-    def update(self, dt):
-
-        self.phi = self.phi
-        self.x += self.v*math.sin(math.radians(self.phi)) *dt
-        self.y += self.v*math.cos(math.radians(self.phi)) *dt
-        self.rect = self.image.get_rect(center = (self.x, self.y))
-        self.mask = pygame.mask.from_surface(self.image)
-
-        
-
-class Background(pygame.sprite.Sprite):
-    """Background class docstring."""
-    
-    def __init__(self, img_path):
-        """Class method docstring."""
-
-        super(Background, self).__init__()
-        self.x = 0
-        self.y = 0
-        self.image = pygame.image.load(os.path.join(MAPS_DIR,img_path))
-        self.image.convert_alpha()
-        self.image = pygame.transform.scale(self.image,(WIDTH,HEIGHT))
-        self.rect = self.image.get_rect()
-        self.LOS_mask = pygame.surfarray.array2d(self.image)
-        self.mask = pygame.mask.from_surface(self.image)
+        # Draw body
+        WIN.blit(self.im_body_rot, self.rect)
+        # Draw fired tank shells
+        for tshell in self.tshell_list:
+            WIN.blit(tshell.image, tshell.rect)
+        WIN.blit(self.im_turret_rot, self.turret_rect)           
 
 
-def handleCollisions(arena, tank1, tank2):
+def handleCollisions(arena:Map, tank1:Tank, tank2:Tank, dt):
 
-    def tankArenaCollision(arena, tank):
+    def tankArenaCollision(arena:Map, tank:Tank, dt):
         col = pygame.sprite.collide_mask(tank, arena)
         if col is not None:
-            print("Boink: ", col)
+            col2 = pygame.sprite.collide_mask(arena, tank)
+            print("Col1: ", col, " Col2: ", col2)
             # tank.revert()
 
-    def tankToTankCollison(tank1, tank2):
+            tank.wallCollision(arena, dt)
+
+    def tankToTankCollison(tank1: Tank, tank2: Tank):
         col = pygame.sprite.collide_mask(tank1, tank2)
         if col is not None:
             tank1.revert()
@@ -305,8 +414,8 @@ def handleCollisions(arena, tank1, tank2):
         att_tank.tshell_list = shell_list2
 
     # Main collision handle
-    tankArenaCollision(arena, tank1)
-    tankArenaCollision(arena, tank2)
+    tankArenaCollision(arena, tank1, dt)
+    tankArenaCollision(arena, tank2, dt)
     tankToTankCollison(tank1, tank2)
     shellCollisions(arena, tank1, tank2)
     shellCollisions(arena, tank2, tank1)
@@ -315,29 +424,25 @@ def handleCollisions(arena, tank1, tank2):
 
 # MAIN LOOP
 def main():
-    global i
+    # Init
+    game = Game()
     pygame.display.set_caption("BUTanks engine")
-
     fpsClock = pygame.time.Clock()
     last_millis = 0
-
     # Objects
     Tank_1 = Tank(200, 100, 90, 20, "tank1.png", "turret1.png", 1)
     Tank_2 = Tank(400, 100, -90, 10, "tank2.png", "turret2.png", 2)
-    arena = Background("map0.png")
+    arena = Map("map0.png")
 
     # GAME LOOP
     run = True
     while run:
-        start = time.time()  # Loop time start
-
-        # HACK non  graphic
-        if target_i == 1:
+        # Get delta time
+        if (game.i_frame == game.target_frame) or (game.render_all_frames):
             dt = last_millis/1000
         else:
-            dt = dt_fix
-        
-        # Check for events
+            dt = game.dt_fixed
+        # Check for events (including input)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
@@ -347,27 +452,23 @@ def main():
             if event.type == pygame.KEYUP:
                 Tank_1.input(event.key, 0)
                 Tank_2.input(event.key, 0)
-
+        # Update objects based on input
         Tank_1.update(dt)
         Tank_2.update(dt)
-
-        handleCollisions(arena, Tank_1, Tank_2)
-        
-        # HACK non  graphic
-        if i == target_i:
-            # Rendering
+        # Check and resolve eventual collisions
+        handleCollisions(arena, Tank_1, Tank_2, dt)
+        # Draw frame based on preferences
+        if (game.i_frame == game.target_frame) or (game.render_all_frames):
             WIN.fill(WHITE)
             pygame.sprite.RenderPlain(arena).draw(WIN)
             Tank_1.draw()
             Tank_2.draw()
             pygame.display.update()
-            i = 0
-
+            game.i_frame = 0
+        else:
+            game.i_frame += 1
+        # Get time from previous tick and limit FPS
         last_millis = fpsClock.tick(TARGET_FPS)
-
-        # print("This loop: ", time.time()-start)  # Print loop time
-        i += 1
-
     pygame.quit()
 
 if __name__ == "__main__":
