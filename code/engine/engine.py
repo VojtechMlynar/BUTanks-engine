@@ -234,7 +234,7 @@ class Tank(pygame.sprite.Sprite):
                     self.shoot = 0
 
 
-    def rotAssets(self, mode = 0):
+    def rotAssets(self):
         """Rotates assets based on positions and updates class rectangle and mask."""
         # Base
         self.im_body_rot = pygame.transform.rotate(self.im_body, self.phi)
@@ -245,7 +245,7 @@ class Tank(pygame.sprite.Sprite):
         self.turret_rect = self.im_turret_rot.get_rect(center = (self.x, self.y))
 
 
-    def update(self, dt):
+    def update(self, dt, mode = 1):
         """Updates class based on input.
 
         Args:
@@ -256,22 +256,23 @@ class Tank(pygame.sprite.Sprite):
         self.last_x = self.x
         self.last_y = self.y
         self.last_phi = self.phi
-        # Handle shooting
-        if self.shoot == 1:
-            if self.shoot_delay >= self.GUN_COOLDOWN:
-                s_phi = self.phi + self.phi_rel
-                s_x0 = self.x + self.canon_len * math.sin(math.radians(s_phi))
-                s_y0 = self.y + self.canon_len * math.cos(math.radians(s_phi))
-                self.tshell_list.append(Tankshell(self.im_tshell, s_x0, s_y0, s_phi, self.TSHELL_SPEED))
-                self.shoot_delay = 0
-        # Gun cooldown updater
-        if self.shoot_delay > self.GUN_COOLDOWN:
-            self.shoot_delay = self.GUN_COOLDOWN
-        elif self.shoot_delay < self.GUN_COOLDOWN:
-            self.shoot_delay += dt
-        # Update of fired shells
-        for tshell in self.tshell_list:
-            tshell.update(dt)
+        if mode == 1:
+            # Handle shooting
+            if self.shoot == 1:
+                if self.shoot_delay >= self.GUN_COOLDOWN:
+                    s_phi = self.phi + self.phi_rel
+                    s_x0 = self.x + self.canon_len * math.sin(math.radians(s_phi))
+                    s_y0 = self.y + self.canon_len * math.cos(math.radians(s_phi))
+                    self.tshell_list.append(Tankshell(self.im_tshell, s_x0, s_y0, s_phi, self.TSHELL_SPEED))
+                    self.shoot_delay = 0
+            # Gun cooldown updater
+            if self.shoot_delay > self.GUN_COOLDOWN:
+                self.shoot_delay = self.GUN_COOLDOWN
+            elif self.shoot_delay < self.GUN_COOLDOWN:
+                self.shoot_delay += dt
+            # Update of fired shells
+            for tshell in self.tshell_list:
+                tshell.update(dt)
         # Handle body movement
         if not self.v_in < 0:
             speed = self.FORWARD_SPEED
@@ -280,15 +281,28 @@ class Tank(pygame.sprite.Sprite):
         self.x += speed*(self.v_in)*math.sin(math.radians(self.phi)) *dt
         self.y += speed*(self.v_in)*math.cos(math.radians(self.phi)) *dt
         self.phi += self.TURN_SPEED*self.phi_in
-        self.phi_rel += self.TURRET_TURN_SPEED*self.phi_rel_in
+        if mode == 1:
+            self.phi_rel += self.TURRET_TURN_SPEED*self.phi_rel_in
         self.rotAssets()
-        
 
-    def revert(self):
+    def revertLast(self):
         self.x = self.last_x
         self.y = self.last_y
         self.phi = self.last_phi
-        self.rotAssets()
+        
+
+    def revertWall(self, map: Map, dt):
+
+        MAX_ITER = 20
+        self.revertLast()
+        dt_step = dt/100
+        for i in range(MAX_ITER):
+            self.update(dt_step, 0)
+            col = pygame.sprite.collide_mask(self, map)
+            if col is not None:
+                self.revertLast()
+                self.rotAssets()
+                break
 
     def wallCollision(self, map: Map, dt):
         """Advaced handling of collision with wall
@@ -366,7 +380,7 @@ class Tank(pygame.sprite.Sprite):
         # Check if collision was solved
         col = pygame.sprite.collide_mask(self, map)
         if col is not None:
-            self.revert()
+            self.revertWall(map, dt)
 
     def draw(self):
         """Draw tank and fired shells."""
@@ -386,15 +400,49 @@ def handleCollisions(arena:Map, tank1:Tank, tank2:Tank, dt):
         if col is not None:
             col2 = pygame.sprite.collide_mask(arena, tank)
             print("Col1: ", col, " Col2: ", col2)
-            # tank.revert()
-
             tank.wallCollision(arena, dt)
 
     def tankToTankCollison(tank1: Tank, tank2: Tank):
         col = pygame.sprite.collide_mask(tank1, tank2)
         if col is not None:
-            tank1.revert()
-            tank2.revert()
+            MAX_ITER = 50
+            t1_orig_x = tank1.last_x
+            t1_orig_y = tank1.last_y
+            t1_orig_phi = tank1.last_phi
+
+            t2_orig_x = tank2.last_x
+            t2_orig_y = tank2.last_y
+            t2_orig_phi = tank2.last_phi
+
+            tank1.revertLast()
+            tank2.revertLast()
+            tank1.rotAssets()
+            tank2.rotAssets()
+            dt_step = dt/MAX_ITER
+
+            fix = 0
+            for i in range(MAX_ITER):
+                col = pygame.sprite.collide_mask(tank1, tank2)
+                if col is not None:
+                    tank1.revertLast()
+                    tank2.revertLast()
+                    fix = 1
+                    break
+                tank1.update(dt_step, 0)
+                tank2.update(dt_step, 0)
+            
+            if (fix == 0) or (abs(t1_orig_phi-tank1.phi) > 25):
+                tank1.x = t1_orig_x
+                tank1.y = t1_orig_y
+                tank1.phi = t1_orig_phi
+            
+            if (fix == 0) or (abs(t2_orig_phi-tank2.phi) > 25):
+                tank2.x = t2_orig_x
+                tank2.y = t2_orig_y
+                tank2.phi = t2_orig_phi
+            
+            tank1.rotAssets()
+            tank2.rotAssets()                
             print("Tank boink together:",col)
 
     def shellCollisions(arena, att_tank, enemy_tank):
