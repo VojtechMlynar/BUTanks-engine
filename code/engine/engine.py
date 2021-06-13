@@ -1,11 +1,11 @@
-""" BUTanks engine v0.0.3 - dev_DB branch
+""" BUTanks engine v0.0.4 - dev_DB branch
 
 TODO:
 [ ] Tank class (NOT FINISHED)
     [ ] Health
     [ ] Destroy
     [ ] Capture time
-    [=] Collisions refine (PARTIALLY)
+    [x] Collisions refine (better than before)
 [ ] Capture area
 [ ] Time invariance
 [=] Comments (PARTIALLY)
@@ -13,10 +13,8 @@ TODO:
 """ 
 
 import os
-import time
 import math
 import pygame
-import numpy as np
 from pathlib import Path
 from pygame.locals import *
 
@@ -26,10 +24,10 @@ WHITE = (100,100,100)  # HACK Dark mode
 TARGET_FPS = 60
 
 # Tank settings
-FORWARD_SPEED = 150
+FORWARD_SPEED = 150  # 150
 BACKWARD_SPEED = 80
-TURN_SPEED = 10
-TURRET_TURN_SPEED = 10
+TURN_SPEED = 250  # 250
+TURRET_TURN_SPEED = 250
 TSHELL_SPEED = 150
 GUN_COOLDOWN = 1
 
@@ -245,18 +243,22 @@ class Tank(pygame.sprite.Sprite):
         self.turret_rect = self.im_turret_rot.get_rect(center = (self.x, self.y))
 
 
-    def update(self, dt, mode = 1):
-        """Updates class based on input.
+    def update(self, dt, mode = 0):
+        """Update game objects based on input.
 
         Args:
-            dt (float): delta time for current "frame"
+            dt (float): Delta time from last "frame"
+            mode (int, optional): Defaults to 0.
+                0 = basic update for next "frame",
+                1 = for revertWall collision handling (iterative method),
+                2 = for tankArenaCollision (iterative method inverse)
         """
 
         # Save last position in case of collision
         self.last_x = self.x
         self.last_y = self.y
         self.last_phi = self.phi
-        if mode == 1:
+        if mode == 0:
             # Handle shooting
             if self.shoot == 1:
                 if self.shoot_delay >= self.GUN_COOLDOWN:
@@ -278,12 +280,19 @@ class Tank(pygame.sprite.Sprite):
             speed = self.FORWARD_SPEED
         else:
             speed = self.BACKWARD_SPEED
+        turn_speed = self.TURN_SPEED
+
+        if mode == 2:
+            speed = speed*(-1)
+            turn_speed = turn_speed*(-1)
+
         self.x += speed*(self.v_in)*math.sin(math.radians(self.phi)) *dt
         self.y += speed*(self.v_in)*math.cos(math.radians(self.phi)) *dt
-        self.phi += self.TURN_SPEED*self.phi_in
-        if mode == 1:
-            self.phi_rel += self.TURRET_TURN_SPEED*self.phi_rel_in
+        self.phi += turn_speed*self.phi_in *dt
+        if mode == 0:
+            self.phi_rel += self.TURRET_TURN_SPEED*self.phi_rel_in *dt
         self.rotAssets()
+
 
     def revertLast(self):
         self.x = self.last_x
@@ -293,16 +302,16 @@ class Tank(pygame.sprite.Sprite):
 
     def revertWall(self, map: Map, dt):
 
-        MAX_ITER = 20
+        MAX_ITER = 40
         self.revertLast()
-        dt_step = dt/100
+        dt_step = dt/MAX_ITER
         for i in range(MAX_ITER):
-            self.update(dt_step, 0)
             col = pygame.sprite.collide_mask(self, map)
             if col is not None:
                 self.revertLast()
                 self.rotAssets()
                 break
+            self.update(dt_step, 1)
 
     def wallCollision(self, map: Map, dt):
         """Advaced handling of collision with wall
@@ -311,45 +320,32 @@ class Tank(pygame.sprite.Sprite):
             map (Map): Map class object
             dt (float): delta time for current "frame"
         """
-        
-        # Forced small steps
-        FORWARD_STEP = 0.5
-        BACKWARD_STEP = 0.5
-        ROT_STEP = 0.5
         MAX_ITER = 20
+        dt_step = dt/MAX_ITER
 
         # Check required movement:
-        # Check speed input
-        if self.v_in > 0:
-            translate_step = -FORWARD_STEP
-        elif self.v_in < 0:
-            translate_step = BACKWARD_STEP
-        else:
-            translate_step = 0
-        # Check rotation input
-        if self.phi_in > 0:
-            rotate_step = -ROT_STEP
-        elif self.phi_in < 0:
-            rotate_step = ROT_STEP
-        else:
-            rotate_step = 0
         # Check simultal inputs -> More complex solution required
-        if (translate_step != 0) and (rotate_step != 0):
+        if (self.v_in != 0) and (self.phi_in != 0):
             caution = 1
+            translate_step = 0.5
         else:
             caution = 0
         # Save collision positions
         x = self.x
         y = self.y
         phi = self.phi
+
+        last_x = self.last_x
+        last_y = self.last_y
+        last_phi = self.last_phi
+
+        fix = 0
         # Iterate to non colliding position
         for i in range(MAX_ITER):
-            self.phi += rotate_step
-            self.x += (translate_step)*math.sin(math.radians(self.phi))
-            self.y += (translate_step)*math.cos(math.radians(self.phi))
-            self.rotAssets()
+            self.update(dt_step, 2)
             col = pygame.sprite.collide_mask(self, map)
             if col is None:
+                fix = 1
                 break
         # If more complex solution is required
         if caution == 1:
@@ -372,15 +368,22 @@ class Tank(pygame.sprite.Sprite):
                     break 
             fixt_dist2 = math.sqrt((abs(x-self.x))**2 + (abs(y-self.y))**2)
             # Compare solutions based on distance
-            if fix_dist < fixt_dist2:
+            if (fix == 1) and (fix_dist < fixt_dist2):
                 self.x = x_fix
                 self.y = y_fix
                 self.phi = phi_fix
+                # if abs(phi-phi_fix) > 
+
                 self.rotAssets()
         # Check if collision was solved
         col = pygame.sprite.collide_mask(self, map)
         if col is not None:
-            self.revertWall(map, dt)
+            self.last_x = last_x
+            self.last_y = last_y
+            self.last_phi = last_phi
+            # self.revertWall(map, dt)
+            self.revertLast()
+            self.rotAssets()
 
     def draw(self):
         """Draw tank and fired shells."""
@@ -405,45 +408,11 @@ def handleCollisions(arena:Map, tank1:Tank, tank2:Tank, dt):
     def tankToTankCollison(tank1: Tank, tank2: Tank):
         col = pygame.sprite.collide_mask(tank1, tank2)
         if col is not None:
-            MAX_ITER = 50
-            t1_orig_x = tank1.last_x
-            t1_orig_y = tank1.last_y
-            t1_orig_phi = tank1.last_phi
-
-            t2_orig_x = tank2.last_x
-            t2_orig_y = tank2.last_y
-            t2_orig_phi = tank2.last_phi
-
             tank1.revertLast()
             tank2.revertLast()
             tank1.rotAssets()
-            tank2.rotAssets()
-            dt_step = dt/MAX_ITER
-
-            fix = 0
-            for i in range(MAX_ITER):
-                col = pygame.sprite.collide_mask(tank1, tank2)
-                if col is not None:
-                    tank1.revertLast()
-                    tank2.revertLast()
-                    fix = 1
-                    break
-                tank1.update(dt_step, 0)
-                tank2.update(dt_step, 0)
-            
-            if (fix == 0) or (abs(t1_orig_phi-tank1.phi) > 25):
-                tank1.x = t1_orig_x
-                tank1.y = t1_orig_y
-                tank1.phi = t1_orig_phi
-            
-            if (fix == 0) or (abs(t2_orig_phi-tank2.phi) > 25):
-                tank2.x = t2_orig_x
-                tank2.y = t2_orig_y
-                tank2.phi = t2_orig_phi
-            
-            tank1.rotAssets()
             tank2.rotAssets()                
-            print("Tank boink together:",col)
+            print("Tanks boink together:",col)
 
     def shellCollisions(arena, att_tank, enemy_tank):
         # Tank shell colllisions
@@ -468,7 +437,6 @@ def handleCollisions(arena:Map, tank1:Tank, tank2:Tank, dt):
     shellCollisions(arena, tank1, tank2)
     shellCollisions(arena, tank2, tank1)
         
-
 
 # MAIN LOOP
 def main():
