@@ -1,12 +1,14 @@
-""" BUTanks engine v0.0.4 - dev_DB branch
+""" BUTanks engine v0.0.5 - dev_DB branch
 
 TODO:
 [ ] Tank class (NOT FINISHED)
-    [ ] Health
-    [ ] Destroy
-    [ ] Capture time
+    [x] Health
+    [x] Destroy (kinda)
+    [x] Capture time
     [x] Collisions refine (better than before)
-[ ] Capture area
+[x] Capture area
+[ ] Random spawning
+[ ] Suitable for more than 1v1
 [ ] Time invariance
 [=] Comments (PARTIALLY)
 [=] Clean (PARTIALLY)
@@ -21,15 +23,27 @@ from pygame.locals import *
 # CONSTANTS
 WIDTH, HEIGHT = 1000, 1000
 WHITE = (100,100,100)  # HACK Dark mode 
+
+# MAP
+MAP_FILENAME = "map1.png"
+
+# Game settings
 TARGET_FPS = 60
+RENDER_ALL_FRAMES = True
+
+# If not RENDER_ALL_FRAMES:
+TARGET_FRAME = 10
+I_FRAME = 0
+DT_FIXED = 0.003
 
 # Tank settings
-FORWARD_SPEED = 150  # 150
+FORWARD_SPEED = 150
 BACKWARD_SPEED = 80
-TURN_SPEED = 250  # 250
+TURN_SPEED = 250
 TURRET_TURN_SPEED = 250
-TSHELL_SPEED = 150
+TSHELL_SPEED = 350
 GUN_COOLDOWN = 1
+MAX_HEALTH = 5
 
 # WINDOW init
 pygame.init()
@@ -44,18 +58,23 @@ IMGS_DIR = os.path.join(ASSETS_DIR,"images")
 
 class Game():
 
+
     def __init__(self):
-        self.who = 0
+        
+        # Stats
+        self.targetCaptureTime = 5
+        self.dt = 0
         
         # Rendering
-        self.render_all_frames = True
-        self.target_frame = 10
-        self.i_frame = 0
-        self.dt_fixed = 0.03
-        
+        self.targetFPS = TARGET_FPS
+        self.render_all_frames = RENDER_ALL_FRAMES
+        self.target_frame = TARGET_FRAME
+        self.i_frame = I_FRAME
+        self.dt_fixed = DT_FIXED
 
-class Map(pygame.sprite.Sprite):
-    """Map class, also known as map."""
+
+class Arena(pygame.sprite.Sprite):
+    """Arena class used for init of whole map, but serves primary as wall sprite."""
     
     def __init__(self, img_filename):
         """
@@ -64,7 +83,7 @@ class Map(pygame.sprite.Sprite):
                 Image must have black walls and transparent background.
         """
 
-        super(Map, self).__init__()
+        super(Arena, self).__init__()
         self.x = 0
         self.y = 0
         self.image = pygame.image.load(os.path.join(MAPS_DIR,img_filename))
@@ -72,8 +91,22 @@ class Map(pygame.sprite.Sprite):
         self.image = pygame.transform.scale(self.image,(WIDTH,HEIGHT))
         self.rect = self.image.get_rect()
         self.LOS_mask = pygame.surfarray.array2d(self.image)
-        self.mask = pygame.mask.from_surface(self.image)
+        self.mask = pygame.mask.from_surface(self.image, 254)
         self.switch = False
+        self.CaptureArea = CaptureArea(self)
+
+
+class CaptureArea(pygame.sprite.Sprite):
+    
+    def __init__(self, arena: Arena):
+        """
+        Args:
+            img_filename (string): Image filename.
+                Image must have black walls and transparent background.
+        """
+        super(CaptureArea, self).__init__()
+        self.mask = pygame.mask.from_surface(arena.image, 125)
+        self.rect = self.mask.get_rect()
 
 
 class Tankshell(pygame.sprite.Sprite):
@@ -156,6 +189,12 @@ class Tank(pygame.sprite.Sprite):
         # Tank shells
         self.tshell_list = []
         self.shoot_delay = self.GUN_COOLDOWN
+        # Tank stats
+        self.health = MAX_HEALTH
+        self.capturing = False
+        self.timeCaptured = 0
+        self.capturedFlag = False
+        self.destroyedFlag = False
 
 
     def input(self, key, key_event):
@@ -166,6 +205,9 @@ class Tank(pygame.sprite.Sprite):
             key_event (int): 0 = KEYUP, 1 = KEYDOWN
         """
         
+        if self.destroyedFlag:
+            return
+
         if self.control_mode == 0:
             a = 0
         elif self.control_mode == 1:
@@ -232,7 +274,7 @@ class Tank(pygame.sprite.Sprite):
                     self.shoot = 0
 
 
-    def rotAssets(self):
+    def moveAssets(self):
         """Rotates assets based on positions and updates class rectangle and mask."""
         # Base
         self.im_body_rot = pygame.transform.rotate(self.im_body, self.phi)
@@ -291,7 +333,7 @@ class Tank(pygame.sprite.Sprite):
         self.phi += turn_speed*self.phi_in *dt
         if mode == 0:
             self.phi_rel += self.TURRET_TURN_SPEED*self.phi_rel_in *dt
-        self.rotAssets()
+        self.moveAssets()
 
 
     def revertLast(self):
@@ -300,7 +342,7 @@ class Tank(pygame.sprite.Sprite):
         self.phi = self.last_phi
         
 
-    def revertWall(self, map: Map, dt):
+    def revertWall(self, map: Arena, dt):
 
         MAX_ITER = 40
         self.revertLast()
@@ -309,11 +351,11 @@ class Tank(pygame.sprite.Sprite):
             col = pygame.sprite.collide_mask(self, map)
             if col is not None:
                 self.revertLast()
-                self.rotAssets()
+                self.moveAssets()
                 break
             self.update(dt_step, 1)
 
-    def wallCollision(self, map: Map, dt):
+    def wallCollision(self, map: Arena, dt):
         """Advaced handling of collision with wall
 
         Args:
@@ -362,7 +404,7 @@ class Tank(pygame.sprite.Sprite):
             for i in range(MAX_ITER):
                 self.x += (translate_step)*math.sin(math.radians((self.phi_in*(-90))+(self.phi)))
                 self.y += (translate_step)*math.cos(math.radians((self.phi_in*(-90))+(self.phi)))
-                self.rotAssets()
+                self.moveAssets()
                 col = pygame.sprite.collide_mask(self, map)
                 if col is None:
                     break 
@@ -374,7 +416,7 @@ class Tank(pygame.sprite.Sprite):
                 self.phi = phi_fix
                 # if abs(phi-phi_fix) > 
 
-                self.rotAssets()
+                self.moveAssets()
         # Check if collision was solved
         col = pygame.sprite.collide_mask(self, map)
         if col is not None:
@@ -383,7 +425,12 @@ class Tank(pygame.sprite.Sprite):
             self.last_phi = last_phi
             # self.revertWall(map, dt)
             self.revertLast()
-            self.rotAssets()
+            self.moveAssets()
+
+    def destroy(self):
+        self.x = -100
+        self.y = -100
+        self.moveAssets()
 
     def draw(self):
         """Draw tank and fired shells."""
@@ -396,9 +443,11 @@ class Tank(pygame.sprite.Sprite):
         WIN.blit(self.im_turret_rot, self.turret_rect)           
 
 
-def handleCollisions(arena:Map, tank1:Tank, tank2:Tank, dt):
+def handleCollisions(arena: Arena, tank1: Tank, tank2: Tank, game: Game):
 
-    def tankArenaCollision(arena:Map, tank:Tank, dt):
+    def tankArenaCollision(arena: Arena, tank: Tank, dt):
+        if tank.destroyedFlag:
+            return
         col = pygame.sprite.collide_mask(tank, arena)
         if col is not None:
             col2 = pygame.sprite.collide_mask(arena, tank)
@@ -406,15 +455,19 @@ def handleCollisions(arena:Map, tank1:Tank, tank2:Tank, dt):
             tank.wallCollision(arena, dt)
 
     def tankToTankCollison(tank1: Tank, tank2: Tank):
+        if tank1.destroyedFlag or tank2.destroyedFlag:
+            return
         col = pygame.sprite.collide_mask(tank1, tank2)
         if col is not None:
             tank1.revertLast()
             tank2.revertLast()
-            tank1.rotAssets()
-            tank2.rotAssets()                
+            tank1.moveAssets()
+            tank2.moveAssets()                
             print("Tanks boink together:",col)
 
-    def shellCollisions(arena, att_tank, enemy_tank):
+    def shellCollisions(arena: Arena, att_tank: Tank, enemy_tank: Tank):
+        if enemy_tank.destroyedFlag:
+            return
         # Tank shell colllisions
         shell_list = []
         for shell in att_tank.tshell_list:
@@ -425,17 +478,39 @@ def handleCollisions(arena:Map, tank1:Tank, tank2:Tank, dt):
         for shell in shell_list:
             col = pygame.sprite.collide_mask(shell, enemy_tank)
             if col is not None:
-                print("bam!")
+                enemy_tank.health -= 1
+                if enemy_tank.health == 0:
+                    enemy_tank.destroyedFlag = True
+                    enemy_tank.destroy()
+                    print("Tank destroyed")
             else:
                 shell_list2.append(shell)
         att_tank.tshell_list = shell_list2
 
+    def captureAreaCheck(arena: Arena, tank: Tank, game: Game):
+        if tank.destroyedFlag:
+            return
+        col = pygame.sprite.collide_mask(arena.CaptureArea, tank)
+        if col is not None:
+            if tank.capturing:
+                tank.timeCaptured += game.dt
+                if tank.timeCaptured >= game.targetCaptureTime:
+                    tank.capturedFlag = True
+                    print("Capture successfull")
+            else:
+                tank.capturing = True
+        else:
+            tank.capturing = False
+
+
     # Main collision handle
-    tankArenaCollision(arena, tank1, dt)
-    tankArenaCollision(arena, tank2, dt)
+    tankArenaCollision(arena, tank1, game.dt)
+    tankArenaCollision(arena, tank2, game.dt)
     tankToTankCollison(tank1, tank2)
     shellCollisions(arena, tank1, tank2)
     shellCollisions(arena, tank2, tank1)
+    captureAreaCheck(arena, tank1, game)
+    captureAreaCheck(arena, tank2, game)
         
 
 # MAIN LOOP
@@ -448,16 +523,16 @@ def main():
     # Objects
     Tank_1 = Tank(200, 100, 90, 20, "tank1.png", "turret1.png", 1)
     Tank_2 = Tank(400, 100, -90, 10, "tank2.png", "turret2.png", 2)
-    arena = Map("map0.png")
+    arena = Arena(MAP_FILENAME)
 
     # GAME LOOP
     run = True
     while run:
         # Get delta time
         if (game.i_frame == game.target_frame) or (game.render_all_frames):
-            dt = last_millis/1000
+            game.dt = last_millis/1000
         else:
-            dt = game.dt_fixed
+            game.dt = game.dt_fixed
         # Check for events (including input)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -469,10 +544,10 @@ def main():
                 Tank_1.input(event.key, 0)
                 Tank_2.input(event.key, 0)
         # Update objects based on input
-        Tank_1.update(dt)
-        Tank_2.update(dt)
+        Tank_1.update(game.dt)
+        Tank_2.update(game.dt)
         # Check and resolve eventual collisions
-        handleCollisions(arena, Tank_1, Tank_2, dt)
+        handleCollisions(arena, Tank_1, Tank_2, game)
         # Draw frame based on preferences
         if (game.i_frame == game.target_frame) or (game.render_all_frames):
             WIN.fill(WHITE)
