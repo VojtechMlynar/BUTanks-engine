@@ -1,21 +1,16 @@
-""" BUTanks engine v0.0.5 - dev_DB branch
+""" BUTanks engine v0.0.6 - dev_DB branch
 
 TODO:
-[ ] Tank class (NOT FINISHED)
-    [x] Health
-    [x] Destroy (kinda)
-    [x] Capture time
-    [x] Collisions refine (better than before)
-[x] Capture area
-[ ] Random spawning
-[ ] Suitable for more than 1v1
-[ ] Time invariance
+[x] Suitable for more than 1v1
+[x] Understand fixed dt (for learning alghorithms)
+[ ] Display game stats
 [=] Comments (PARTIALLY)
 [=] Clean (PARTIALLY)
 """ 
 
 import os
 import math
+import itertools
 import pygame
 from pathlib import Path
 from pygame.locals import *
@@ -28,13 +23,14 @@ WHITE = (100,100,100)  # HACK Dark mode
 MAP_FILENAME = "map1.png"
 
 # Game settings
-TARGET_FPS = 60
-RENDER_ALL_FRAMES = True
+TARGET_FPS = 60  # Change to high value for non graphic learning
+RENDER_ALL_FRAMES = False
+FIXED_DT = 1/30  # As 25 FPS is good enough
+TEAM_1 = 1
+TEAM_2 = 1
 
 # If not RENDER_ALL_FRAMES:
-TARGET_FRAME = 10
-I_FRAME = 0
-DT_FIXED = 0.003
+TARGET_FRAME = 50
 
 # Tank settings
 FORWARD_SPEED = 150
@@ -60,15 +56,43 @@ class Game():
     def __init__(self):
         
         # Stats
-        self.targetCaptureTime = 5
+        self.target_capture_time = 5
         self.dt = 0
+        self.team_1_capture_time = 0
+        self.team_2_capture_time = 0
+        self.team_1_captured_flag = False
+        self.team_2_captured_flag = False
+        self.team_1_alive = TEAM_1
+        self.team_2_alive = TEAM_2
         
         # Rendering
         self.targetFPS = TARGET_FPS
         self.render_all_frames = RENDER_ALL_FRAMES
         self.target_frame = TARGET_FRAME
-        self.i_frame = I_FRAME
-        self.dt_fixed = DT_FIXED
+        self.i_frame = 0
+        self.dt_fixed = FIXED_DT
+
+        # Team lists
+        self.team_1_list = []
+        self.team_2_list = []
+        self.master_list = None
+        self.combinations_list = None
+
+        # States
+    
+    def checkState(self):
+
+        if self.team_1_capture_time >= self.target_capture_time:
+            self.team_1_captured_flag = True
+            print("TEAM 1 JUST CAPTURED AREA!")
+        if self.team_2_capture_time >= self.target_capture_time:
+            self.team_2_captured_flag = True
+            print("TEAM 2 JUST CAPTURED AREA!")
+
+        if self.team_1_alive == 0:
+            print("TEAM 1 JUST DIED!")
+        if self.team_2_alive == 0:
+            print("TEAM 2 JUST DIED!")
 
 
 class Arena(pygame.sprite.Sprite):
@@ -195,7 +219,7 @@ class Tank(pygame.sprite.Sprite):
         self.timeCaptured = 0
         self.capturedFlag = False
         self.destroyedFlag = False
-
+        
 
     def input(self, key, key_event):
         """Handles inputs
@@ -240,37 +264,6 @@ class Tank(pygame.sprite.Sprite):
                 elif key == pygame.K_p:
                     self.phi_rel_in = 0
                 elif key == pygame.K_o:
-                    self.shoot = 0
-        else:
-            if key_event == 1:
-                if key == pygame.K_d:
-                    self.phi_in = 1
-                elif key == pygame.K_g:
-                    self.phi_in = -1
-                elif key == pygame.K_r:
-                    self.v_in = 1
-                elif key == pygame.K_f:
-                    self.v_in = -1
-                elif key == pygame.K_q:
-                    self.phi_rel_in = 1
-                elif key == pygame.K_e:
-                    self.phi_rel_in = -1
-                elif key == pygame.K_w:
-                    self.shoot = 1
-            else:
-                if key == pygame.K_d:
-                    self.phi_in = 0
-                elif key == pygame.K_g:
-                    self.phi_in = 0
-                elif key == pygame.K_r:
-                    self.v_in = 0
-                elif key == pygame.K_f:
-                    self.v_in = 0
-                elif key == pygame.K_q:
-                    self.phi_rel_in = 0
-                elif key == pygame.K_e:
-                    self.phi_rel_in = 0
-                elif key == pygame.K_w:
                     self.shoot = 0
 
 
@@ -336,7 +329,7 @@ class Tank(pygame.sprite.Sprite):
         self.moveAssets()
 
 
-    def revertLast(self):
+    def revertToLast(self):
         self.x = self.last_x
         self.y = self.last_y
         self.phi = self.last_phi
@@ -345,12 +338,12 @@ class Tank(pygame.sprite.Sprite):
     def revertWall(self, map: Arena, dt):
 
         MAX_ITER = 40
-        self.revertLast()
+        self.revertToLast()
         dt_step = dt/MAX_ITER
         for i in range(MAX_ITER):
             col = pygame.sprite.collide_mask(self, map)
             if col is not None:
-                self.revertLast()
+                self.revertToLast()
                 self.moveAssets()
                 break
             self.update(dt_step, 1)
@@ -424,7 +417,7 @@ class Tank(pygame.sprite.Sprite):
             self.last_y = last_y
             self.last_phi = last_phi
             # self.revertWall(map, dt)
-            self.revertLast()
+            self.revertToLast()
             self.moveAssets()
 
     def destroy(self):
@@ -443,15 +436,13 @@ class Tank(pygame.sprite.Sprite):
         WIN.blit(self.im_turret_rot, self.turret_rect)           
 
 
-def handleCollisions(arena: Arena, tank1: Tank, tank2: Tank, game: Game):
+def handleCollisions(arena: Arena, game: Game):
 
     def tankArenaCollision(arena: Arena, tank: Tank, dt):
         if tank.destroyedFlag:
             return
         col = pygame.sprite.collide_mask(tank, arena)
         if col is not None:
-            col2 = pygame.sprite.collide_mask(arena, tank)
-            print("Col1: ", col, " Col2: ", col2)
             tank.wallCollision(arena, dt)
 
     def tankToTankCollison(tank1: Tank, tank2: Tank):
@@ -459,58 +450,76 @@ def handleCollisions(arena: Arena, tank1: Tank, tank2: Tank, game: Game):
             return
         col = pygame.sprite.collide_mask(tank1, tank2)
         if col is not None:
-            tank1.revertLast()
-            tank2.revertLast()
+            tank1.revertToLast()
+            tank2.revertToLast()
             tank1.moveAssets()
             tank2.moveAssets()                
             print("Tanks boink together:",col)
 
-    def shellCollisions(arena: Arena, att_tank: Tank, enemy_tank: Tank):
-        if enemy_tank.destroyedFlag:
-            return
-        # Tank shell colllisions
-        shell_list = []
-        for shell in att_tank.tshell_list:
-            col = pygame.sprite.collide_mask(shell, arena)
-            if col is None:
-                shell_list.append(shell)
-        shell_list2 = []
-        for shell in shell_list:
-            col = pygame.sprite.collide_mask(shell, enemy_tank)
-            if col is not None:
-                enemy_tank.health -= 1
-                if enemy_tank.health == 0:
-                    enemy_tank.destroyedFlag = True
-                    enemy_tank.destroy()
-                    print("Tank destroyed")
-            else:
-                shell_list2.append(shell)
-        att_tank.tshell_list = shell_list2
+    def shellCollisions(arena: Arena, game: Game, tank: Tank, opposing_team):
 
-    def captureAreaCheck(arena: Arena, tank: Tank, game: Game):
+        if opposing_team == 1:
+            opposing_team_list = game.team_1_list
+        elif opposing_team == 2:
+            opposing_team_list = game.team_2_list
+
+        for opposing_tank in opposing_team_list:
+            if opposing_tank.destroyedFlag:
+                continue
+            # Tank shell colllisions
+            shell_list = []
+            for shell in tank.tshell_list:
+                col = pygame.sprite.collide_mask(shell, arena)
+                if col is None:
+                    shell_list.append(shell)
+            shell_list2 = []
+            for shell in shell_list:
+                col = pygame.sprite.collide_mask(shell, opposing_tank)
+                if col is not None:
+                    opposing_tank.health -= 1
+                    if opposing_tank.health == 0:
+                        opposing_tank.destroyedFlag = True
+                        opposing_tank.destroy()
+                        if opposing_team == 1:
+                            game.team_1_alive -= 1
+                            print("Team 1 tank destroyed")
+                        elif opposing_team == 2:
+                            game.team_2_alive -= 2
+                            print("Team 2 tank destroyed")
+                else:
+                    shell_list2.append(shell)
+            tank.tshell_list = shell_list2       
+
+    def captureAreaCheck(arena: Arena, tank: Tank, team, game: Game):
         if tank.destroyedFlag:
             return
         col = pygame.sprite.collide_mask(arena.CaptureArea, tank)
         if col is not None:
             if tank.capturing:
                 tank.timeCaptured += game.dt
-                if tank.timeCaptured >= game.targetCaptureTime:
-                    tank.capturedFlag = True
-                    print("Capture successfull")
+                if team == 1:
+                    game.team_1_capture_time += game.dt
+                elif team == 2:
+                    game.team_2_capture_time += game.dt                    
             else:
                 tank.capturing = True
         else:
             tank.capturing = False
 
-
-    # Main collision handle
-    tankArenaCollision(arena, tank1, game.dt)
-    tankArenaCollision(arena, tank2, game.dt)
-    tankToTankCollison(tank1, tank2)
-    shellCollisions(arena, tank1, tank2)
-    shellCollisions(arena, tank2, tank1)
-    captureAreaCheck(arena, tank1, game)
-    captureAreaCheck(arena, tank2, game)
+    combinations_list = itertools.combinations(game.master_list,2)
+    
+    for tank in game.master_list:
+        tankArenaCollision(arena, tank, game.dt)
+    for comb in combinations_list:
+        tankToTankCollison(comb[0], comb[1])
+    for tank in game.team_1_list:
+        shellCollisions(arena, game, tank, 2)
+    for tank in game.team_2_list:
+        shellCollisions(arena, game, tank, 1)
+    for tank1 in game.team_1_list:
+        captureAreaCheck(arena, tank1, 1, game)
+    for tank2 in game.team_2_list:
+        captureAreaCheck(arena, tank2, 2, game)
         
 
 # MAIN LOOP
@@ -521,8 +530,14 @@ def main():
     fpsClock = pygame.time.Clock()
     last_millis = 0
     # Objects
-    Tank_1 = Tank(200, 100, 90, 20, "tank1.png", "turret1.png", 1)
-    Tank_2 = Tank(400, 100, -90, 10, "tank2.png", "turret2.png", 2)
+    for i in range(game.team_1_alive):
+        print("lol ", i)
+        game.team_1_list.append(Tank(200+(200*i), 100, 90, 0, "tank1.png", "turret1.png", 1))
+    for i in range(game.team_2_alive):
+        game.team_2_list.append(Tank(WIDTH-200-(200*i), HEIGHT-100, 180, 0, "tank2.png", "turret2.png", 0))
+
+    game.master_list = game.team_1_list + game.team_2_list
+    
     arena = Arena(MAP_FILENAME)
 
     # GAME LOOP
@@ -538,28 +553,30 @@ def main():
             if event.type == pygame.QUIT:
                 run = False
             if event.type == pygame.KEYDOWN:
-                Tank_1.input(event.key, 1)
-                Tank_2.input(event.key, 1)
+                for tank in game.master_list:
+                    tank.input(event.key, 1)
             if event.type == pygame.KEYUP:
-                Tank_1.input(event.key, 0)
-                Tank_2.input(event.key, 0)
+                for tank in game.master_list:
+                    tank.input(event.key, 0)
         # Update objects based on input
-        Tank_1.update(game.dt)
-        Tank_2.update(game.dt)
+        for tank in game.master_list:
+            tank.update(game.dt)
         # Check and resolve eventual collisions
-        handleCollisions(arena, Tank_1, Tank_2, game)
+        handleCollisions(arena, game)
         # Draw frame based on preferences
         if (game.i_frame == game.target_frame) or (game.render_all_frames):
             WIN.fill(WHITE)
             pygame.sprite.RenderPlain(arena).draw(WIN)
-            Tank_1.draw()
-            Tank_2.draw()
+            for tank in game.master_list:
+                tank.draw()
             pygame.display.update()
             game.i_frame = 0
         else:
             game.i_frame += 1
+        game.checkState()
         # Get time from previous tick and limit FPS
-        last_millis = fpsClock.tick(TARGET_FPS)
+        last_millis = fpsClock.tick(game.targetFPS)
+        # print("FPS: ", 1/(last_millis/1000))
     pygame.quit()
 
 if __name__ == "__main__":
