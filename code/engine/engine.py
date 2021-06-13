@@ -55,9 +55,7 @@ ASSETS_DIR = os.path.join(p,"assets")
 MAPS_DIR = os.path.join(ASSETS_DIR,"maps")
 IMGS_DIR = os.path.join(ASSETS_DIR,"images")
 
-
 class Game():
-
 
     def __init__(self):
         
@@ -91,9 +89,11 @@ class Arena(pygame.sprite.Sprite):
         self.image = pygame.transform.scale(self.image,(WIDTH,HEIGHT))
         self.rect = self.image.get_rect()
         self.LOS_mask = pygame.surfarray.array2d(self.image)
+
         self.mask = pygame.mask.from_surface(self.image, 254)
         self.switch = False
         self.CaptureArea = CaptureArea(self)
+
 
 
 class CaptureArea(pygame.sprite.Sprite):
