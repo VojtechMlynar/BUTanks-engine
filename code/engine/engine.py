@@ -16,7 +16,9 @@ TODO:
 
 import os
 import math
+import numpy as np
 import pygame
+import tanks_utility as tu
 from pathlib import Path
 from pygame.locals import *
 
@@ -55,6 +57,9 @@ ASSETS_DIR = os.path.join(p,"assets")
 MAPS_DIR = os.path.join(ASSETS_DIR,"maps")
 IMGS_DIR = os.path.join(ASSETS_DIR,"images")
 
+# INTERNAL
+NAV_MARGIN = 25
+
 class Game():
 
     def __init__(self):
@@ -86,10 +91,26 @@ class Arena(pygame.sprite.Sprite):
         self.y = 0
         self.image = pygame.image.load(os.path.join(MAPS_DIR,img_filename))
         self.image.convert_alpha()
+        w, h = self.image.get_size()
+
+        # load image and create weights array
+        self.weights_scale = WIDTH/w
+        self.weights = pygame.surfarray.array_alpha(self.image)
+        self.weights[np.where(self.weights < 255)] = 0
+        self.weights = self.weights.astype(np.float32)
+
+        # dilate image to get safety navigation margin
+        dil = math.ceil(NAV_MARGIN/self.weights_scale)
+        dilated = tu.dilate_image(self.weights, dil, "max")
+        self.weights_scaled = tu.resize_image(dilated, WIDTH, HEIGHT) 
+        obstacles = np.where(dilated != 0)
+        self.weights[obstacles[0], obstacles[1]] = np.inf
+        self.weights += 1 # For astar search - lowest value is 1
+
         self.image = pygame.transform.scale(self.image,(WIDTH,HEIGHT))
         self.rect = self.image.get_rect()
-        self.LOS_mask = pygame.surfarray.array2d(self.image)
-
+        self.LOS_mask = pygame.surfarray.array_alpha(self.image)
+        self.LOS_mask[np.where(self.LOS_mask < 255)] = 0
         self.mask = pygame.mask.from_surface(self.image, 254)
         self.switch = False
         self.CaptureArea = CaptureArea(self)
@@ -154,6 +175,7 @@ class Tank(pygame.sprite.Sprite):
         # Load resources
         self.im_body = pygame.image.load(os.path.join(IMGS_DIR,img_body))
         self.im_body.convert()
+        self.w, self.h = self.im_body.get_size()
         self.im_turret = pygame.image.load(os.path.join(IMGS_DIR,img_turret))
         self.im_turret.convert()
         self.im_tshell = pygame.image.load(os.path.join(IMGS_DIR,"tank_shell.png"))
@@ -162,6 +184,8 @@ class Tank(pygame.sprite.Sprite):
         # Initial positions
         self.x = pos0_x
         self.y = pos0_y
+        #self.xm = pos0_x + round(self.w/2)
+        #self.ym = pos0_y + round(self.h/2)
         self.phi = phi0
         self.phi_rel = phi_rel0
         # Properties
@@ -195,6 +219,12 @@ class Tank(pygame.sprite.Sprite):
         self.timeCaptured = 0
         self.capturedFlag = False
         self.destroyedFlag = False
+        # Tank antennas
+        self._ant_num = 18
+        self.antennas = np.linspace(
+            0, 2*np.pi - (2*np.pi/self._ant_num), self._ant_num)
+        self.ant_distances = np.zeros(self._ant_num)
+        self.ant_points = np.zeros((self._ant_num, 2))
 
 
     def input(self, key, key_event):
@@ -273,6 +303,19 @@ class Tank(pygame.sprite.Sprite):
                 elif key == pygame.K_w:
                     self.shoot = 0
 
+    def inputAI(self, inputs):
+        """AI control input method 
+        
+        inputs -- list in format:
+         [0] -- carriage rotation 1/0/-1
+         [1] -- carriage forward/backwards movement 1/0/-1
+         [2] -- turret rotation 1/0/-1
+         [3] -- shoot 1/0
+        """
+        self.phi_in = round(inputs[0])
+        self.v_in = round(inputs[1])
+        self.phi_rel_in = round(inputs[2])
+        self.shoot = round(inputs[3])
 
     def moveAssets(self):
         """Rotates assets based on positions and updates class rectangle and mask."""
@@ -284,12 +327,24 @@ class Tank(pygame.sprite.Sprite):
         self.im_turret_rot = pygame.transform.rotate(self.im_turret, self.phi + self.phi_rel)
         self.turret_rect = self.im_turret_rot.get_rect(center = (self.x, self.y))
 
+    def measureDistances(self, env):
+        """Measure distances from sensors to LOS blocking environment 
+        
+        env -- arena handle
+        """
+        phi_rad = math.radians(self.phi)
+        for i in range(0,self._ant_num):
+            self.ant_distances[i],xt ,yt = tu.cast_line(
+                self.x, self.y, 
+                self.antennas[i] + phi_rad, env.LOS_mask)
+            self.ant_points[i] = np.array([xt, yt], ndmin=2)
 
-    def update(self, dt, mode = 0):
+    def update(self, dt, env: Arena, mode = 0):
         """Update game objects based on input.
 
         Args:
             dt (float): Delta time from last "frame"
+            env - Arena handle
             mode (int, optional): Defaults to 0.
                 0 = basic update for next "frame",
                 1 = for revertWall collision handling (iterative method),
@@ -331,8 +386,14 @@ class Tank(pygame.sprite.Sprite):
         self.x += speed*(self.v_in)*math.sin(math.radians(self.phi)) *dt
         self.y += speed*(self.v_in)*math.cos(math.radians(self.phi)) *dt
         self.phi += turn_speed*self.phi_in *dt
+        if self.phi > 360:
+            self.phi = self.phi - 360*(self.phi // 360)
+        elif self.phi < 0:
+            self.phi = self.phi + 360*(1 - (self.phi // 360))
+
         if mode == 0:
             self.phi_rel += self.TURRET_TURN_SPEED*self.phi_rel_in *dt
+        self.measureDistances(env)
         self.moveAssets()
 
 
@@ -384,7 +445,7 @@ class Tank(pygame.sprite.Sprite):
         fix = 0
         # Iterate to non colliding position
         for i in range(MAX_ITER):
-            self.update(dt_step, 2)
+            self.update(dt_step, map, 2)
             col = pygame.sprite.collide_mask(self, map)
             if col is None:
                 fix = 1
@@ -440,7 +501,13 @@ class Tank(pygame.sprite.Sprite):
         # Draw fired tank shells
         for tshell in self.tshell_list:
             WIN.blit(tshell.image, tshell.rect)
-        WIN.blit(self.im_turret_rot, self.turret_rect)           
+        WIN.blit(self.im_turret_rot, self.turret_rect)
+        # Draw distance measuring lines
+        for i in range(0,self._ant_num):
+            xt = self.ant_points[i,0]
+            yt = self.ant_points[i,1]
+            pygame.draw.line(WIN, (255, 0, 0), 
+                (self.x, self.y), (xt, yt), 1)           
 
 
 def handleCollisions(arena: Arena, tank1: Tank, tank2: Tank, game: Game):
@@ -521,7 +588,7 @@ def main():
     fpsClock = pygame.time.Clock()
     last_millis = 0
     # Objects
-    Tank_1 = Tank(200, 100, 90, 20, "tank1.png", "turret1.png", 1)
+    Tank_1 = Tank(200, 100, 0, 20, "tank1.png", "turret1.png", 1)
     Tank_2 = Tank(400, 100, -90, 10, "tank2.png", "turret2.png", 2)
     arena = Arena(MAP_FILENAME)
 
@@ -544,8 +611,8 @@ def main():
                 Tank_1.input(event.key, 0)
                 Tank_2.input(event.key, 0)
         # Update objects based on input
-        Tank_1.update(game.dt)
-        Tank_2.update(game.dt)
+        Tank_1.update(game.dt, arena)
+        Tank_2.update(game.dt, arena)
         # Check and resolve eventual collisions
         handleCollisions(arena, Tank_1, Tank_2, game)
         # Draw frame based on preferences

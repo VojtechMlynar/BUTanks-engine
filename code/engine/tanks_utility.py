@@ -80,6 +80,12 @@ def cast_line(x0, y0, phi, env):
 
     returns euclidean distance to the obstacle and that point's coordinates 
     """
+
+    if phi > 2*np.pi:
+        phi = phi - 2*np.pi*(phi // (2*np.pi))
+    elif phi < 0:
+        phi = phi + 2*np.pi*(1-(phi // (2*np.pi)))
+
     x = round(x0)
     y = round(y0) 
 
@@ -89,7 +95,7 @@ def cast_line(x0, y0, phi, env):
     if abs(k) > 1:
         while (env[round(x),round(y)] == 0):
             if is_close(1/k, 0, 1e-3) is True:
-                if phi == np.pi/2:
+                if is_close(phi, np.pi/2, 1e-3) is True:
                     y += 1
                 else:
                     y -= 1
@@ -104,7 +110,7 @@ def cast_line(x0, y0, phi, env):
     else:
         while (env[round(x),round(y)] == 0):
             if is_close(k, 0, 1e-3) is True:
-                if phi == 0:
+                if is_close(phi, 0, 1e-3) is True:
                     x += 1
                 else:
                     x -= 1
