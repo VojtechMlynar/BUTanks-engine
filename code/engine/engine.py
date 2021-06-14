@@ -1,9 +1,11 @@
-""" BUTanks engine v0.0.6 - dev_DB branch
+""" BUTanks engine v0.0.7 - dev_DB branch
 
 TODO:
 [x] Suitable for more than 1v1
 [x] Understand fixed dt (for learning alghorithms)
 [ ] Display game stats
+[ ] Game states
+[ ] I/O and its link with AI
 [=] Comments (PARTIALLY)
 [=] Clean (PARTIALLY)
 """ 
@@ -13,32 +15,30 @@ import math
 import itertools
 import pygame
 from pathlib import Path
-from pygame.locals import *
-
-# CONSTANTS
-WIDTH, HEIGHT = 1000, 1000
-WHITE = (100,100,100)  # HACK Dark mode 
 
 # MAP
 MAP_FILENAME = "map1.png"
+WIDTH, HEIGHT = 1000, 1000
+WHITE = (100,100,100)  # HACK Dark mode 
 
 # Game settings
-TARGET_FPS = 60  # Change to high value for non graphic learning
-RENDER_ALL_FRAMES = False
-FIXED_DT = 1/30  # As 25 FPS is good enough
-TEAM_1 = 1
-TEAM_2 = 1
+TEAM_1 = 1                # Number of Team 1 tanks
+TEAM_2 = 1                # Number of Team 2 tanks
+TARGET_CAPTURE_TIME = 5   # Time that must be spent in capture area [s]
 
-# If not RENDER_ALL_FRAMES:
-TARGET_FRAME = 50
+# Game rendering
+TARGET_FPS = 60           # Set very high for non graphic learning (e.g. 10000)
+RENDER_ALL_FRAMES = True  # Set False for non graphic learning
+TARGET_FRAME = 100        # Every n-th rendered frame  
+FIXED_DT = None     # None for graphic mode otherwise reccomended value is 1/25 
 
 # Tank settings
-FORWARD_SPEED = 150
-BACKWARD_SPEED = 80
-TURN_SPEED = 250
-TURRET_TURN_SPEED = 250
-TSHELL_SPEED = 350
-GUN_COOLDOWN = 1
+FORWARD_SPEED = 150      # [px/s]
+BACKWARD_SPEED = 80      # [px/s]
+TURN_SPEED = 250         # [deg/s]
+TURRET_TURN_SPEED = 250  # [deg/s]
+TSHELL_SPEED = 350       # [px/s]
+GUN_COOLDOWN = 1         # [s]
 MAX_HEALTH = 5
 
 # WINDOW init
@@ -51,19 +51,65 @@ ASSETS_DIR = os.path.join(p,"assets")
 MAPS_DIR = os.path.join(ASSETS_DIR,"maps")
 IMGS_DIR = os.path.join(ASSETS_DIR,"images")
 
+# TODO: Check comments esp: (i_frame, master_list)
 class Game():
+    """Game object holds important data for proper game function.
+
+    Attributes:
+            target_capture_time: int
+                Target capture time in seconds.
+            dt: float
+                Time step between "frames" in seconds. 
+                (Also known as delta time.)
+            team_1_capture_time: float
+                Team 1 captured time in seconds.
+            team_2_capture_time: float
+                Team 2 captured time in seconds.
+            team_1_alive: int
+                Number of Team 1 members alive.
+            team_2_alive: int
+                Number of Team 2 members alive.
+            team_1_captured_flag: bool
+                True if Team 1 captured area.
+            team_2_captured_flag: bool
+                True if Team 2 captured area.
+            targetFPS: int
+                The Frames Per Second (FPS) cap. 
+                Set very high for non graphic learning.
+            render_all_frames: bool
+                Set False for rendering only target frames.
+            target_frame: int
+                Target frame number.
+                Only multiplies will be rendered.
+            i_frame: int
+                Current frame number.
+            dt_fixed: None or float
+                If not None, sets fixed time step in seconds.
+                Usefull for non graphic learning.
+            team_1_list: list
+                List of Team 1 Tank objects.
+            team_2_list: list
+                List of Team 2 Tank objects.
+            master_list: list
+                team_1_list + team_2_list created after their creation!  
+    """
 
     def __init__(self):
-        
-        # Stats
+        """Initializes Game class object with following attributes."""
+
+        # Settings
         self.target_capture_time = 5
+        self.team_1_alive = TEAM_1
+        self.team_2_alive = TEAM_2
+                
+        # Stats
         self.dt = 0
         self.team_1_capture_time = 0
         self.team_2_capture_time = 0
+
+        # State related
         self.team_1_captured_flag = False
         self.team_2_captured_flag = False
-        self.team_1_alive = TEAM_1
-        self.team_2_alive = TEAM_2
         
         # Rendering
         self.targetFPS = TARGET_FPS
@@ -76,19 +122,18 @@ class Game():
         self.team_1_list = []
         self.team_2_list = []
         self.master_list = None
-        self.combinations_list = None
-
-        # States
     
     def checkState(self):
-
+        """Check game conditions and eventually switch game state."""
+        
+        # Check if team had already captured area
         if self.team_1_capture_time >= self.target_capture_time:
             self.team_1_captured_flag = True
             print("TEAM 1 JUST CAPTURED AREA!")
         if self.team_2_capture_time >= self.target_capture_time:
             self.team_2_captured_flag = True
             print("TEAM 2 JUST CAPTURED AREA!")
-
+        # Check if whole team is destroyded
         if self.team_1_alive == 0:
             print("TEAM 1 JUST DIED!")
         if self.team_2_alive == 0:
@@ -96,13 +141,19 @@ class Game():
 
 
 class Arena(pygame.sprite.Sprite):
-    """Arena class used for init of whole map, but serves primary as wall sprite."""
+    """Arena sprite with CaptureArea attribute.
     
-    def __init__(self, img_filename):
+    Important attribute:
+        CaptureArea: CaptureArea object for capture area detection.  
+    """
+    
+    def __init__(self, img_filename: str):
         """
-        Args:
-            img_filename (string): Image filename.
-                Image must have black walls and transparent background.
+        Parameters:
+            img_filename: Arena image filename.
+
+        Notes:
+            Image must have non transparent walls and transparent background.    
         """
 
         super(Arena, self).__init__()
@@ -113,41 +164,61 @@ class Arena(pygame.sprite.Sprite):
         self.image = pygame.transform.scale(self.image,(WIDTH,HEIGHT))
         self.rect = self.image.get_rect()
         self.LOS_mask = pygame.surfarray.array2d(self.image)
-
         self.mask = pygame.mask.from_surface(self.image, 254)
         self.switch = False
         self.CaptureArea = CaptureArea(self)
 
 
-
 class CaptureArea(pygame.sprite.Sprite):
+    """Capture area sprite for collision detection.
     
+    Notes:
+        Instance is automatically created via Arena init.  
+        Capture area must be specified in .png by color with more than 
+        50% transparency (alpha value above 125)!  
+    """
+
     def __init__(self, arena: Arena):
         """
-        Args:
-            img_filename (string): Image filename.
-                Image must have black walls and transparent background.
+        Parameters:
+            arena: Arena class instance.  
         """
+
         super(CaptureArea, self).__init__()
         self.mask = pygame.mask.from_surface(arena.image, 125)
         self.rect = self.mask.get_rect()
 
 
-class Tankshell(pygame.sprite.Sprite):
-    """Tank shell class."""
+class TankShell(pygame.sprite.Sprite):
+    """Tank shell sprite for collision detection."""
 
-    def __init__(self, im_tank_shell, x0, y0, phi, v):
-        
-        super(Tankshell, self).__init__()
+    def __init__(self, im_tank_shell: pygame.image, x0: float, y0: float,
+                phi: float, v: float):
+        """
+        Parameters:
+            im_tank_shell: Tank shell asset image.
+            x0: Initial center coordinate on x axis in pixels.
+            y0: Initial center coordinate on y axis in pixels.
+            phi: Initial angle in degrees.
+            v: Speed of tank shell in pixels per second.  
+        """
+
+        super(TankShell, self).__init__()
         self.phi = phi
         self.x = x0
         self.y = y0
         self.v = v
-
         self.image = pygame.transform.rotate(im_tank_shell, self.phi)
         self.rect = self.image.get_rect(center = (self.x, self.y))
 
-    def update(self, dt):
+    def update(self, dt: float):
+        """Updates position based on time step.
+        
+        Also updates rectangle and mask attributes for further collision checks.
+
+        Parameters:
+            dt: Time step in seconds.
+        """
 
         self.phi = self.phi
         self.x += self.v*math.sin(math.radians(self.phi)) *dt
@@ -155,22 +226,23 @@ class Tankshell(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center = (self.x, self.y))
         self.mask = pygame.mask.from_surface(self.image)
 
-
+#  TODO contorl_mode comment and add relative attribute comments
 class Tank(pygame.sprite.Sprite):
-    """Tank class, main class of tank."""
+    """Tank object (most important of all)."""
 
-    def __init__(self, pos0_x, pos0_y, phi0, phi_rel0, img_body, img_turret, cntrl_mode):
+    def __init__(self, pos0_x: float, pos0_y: float, phi0: float, 
+                phi_rel0: float, img_body: str, img_turret: str, 
+                img_tshell: str, cntrl_mode: int):
         """
-        Args:
-            pos0_x (int or float): Initial coordinate of tank cennter on x axis
-            pos0_y (int or float): Initial coordinate of tank cennter on y axis
-            phi0 (int or float): Initial angle of tank
-            phi_rel0 (int or float): Initial relative angle of tank turret
-            img_body (string): Tank body asset filename
-            img_turret (string): Tank turret asset filename
-            cntrl_mode (int): Control mode: 0 = computer
-                                            1 = keybind 1 (for dev)
-                                            2 = keybind 2 (for dev)
+        Paramters:
+            pos0_x: Initial center coordinate on x axis in pixels.
+            pos0_y:  Initial center coordinate on y axis in pixels.
+            phi0: Initial body angle in degrees.
+            phi_rel0: Initial relative angle of canon in degrees.
+            img_body: Tank body asset filename.
+            img_turret: Tank turret asset filename.
+            img_tshell: Tank shell asset filename.
+            cntrl_mode: [description]
         """
 
         super(Tank, self).__init__()
@@ -180,7 +252,7 @@ class Tank(pygame.sprite.Sprite):
         self.im_body.convert()
         self.im_turret = pygame.image.load(os.path.join(IMGS_DIR,img_turret))
         self.im_turret.convert()
-        self.im_tshell = pygame.image.load(os.path.join(IMGS_DIR,"tank_shell.png"))
+        self.im_tshell = pygame.image.load(os.path.join(IMGS_DIR,img_tshell))
         self.im_tshell.convert()
         self.canon_len = self.im_turret.get_height()/2
         # Initial positions
@@ -220,11 +292,11 @@ class Tank(pygame.sprite.Sprite):
         self.capturedFlag = False
         self.destroyedFlag = False
         
-
-    def input(self, key, key_event):
+    # TODO: NEED CHANGE!
+    def input(self, key: pygame.key, key_event: int):
         """Handles inputs
 
-        Args:
+        Parameters:
             key (pygame.event.key): pygame key associated with event 
             key_event (int): 0 = KEYUP, 1 = KEYDOWN
         """
@@ -268,18 +340,22 @@ class Tank(pygame.sprite.Sprite):
 
 
     def moveAssets(self):
-        """Rotates assets based on positions and updates class rectangle and mask."""
+        """Rotates and moves assets based on positions.
+        
+        Also updates rectangle and mask attributes for further collision checks.
+        """
         # Base
         self.im_body_rot = pygame.transform.rotate(self.im_body, self.phi)
         self.rect = self.im_body_rot.get_rect(center = (self.x, self.y))
         self.mask = pygame.mask.from_surface(self.im_body_rot)
         # Turret
-        self.im_turret_rot = pygame.transform.rotate(self.im_turret, self.phi + self.phi_rel)
-        self.turret_rect = self.im_turret_rot.get_rect(center = (self.x, self.y))
+        self.im_turret_rot = pygame.transform.rotate(self.im_turret, 
+                                                    self.phi+self.phi_rel)
+        self.turret_rect = self.im_turret_rot.get_rect(center=(self.x, self.y))
 
 
-    def update(self, dt, mode = 0):
-        """Update game objects based on input.
+    def update(self, dt: float, mode: int = 0):
+        """Update tank related objects based on input.
 
         Args:
             dt (float): Delta time from last "frame"
@@ -300,7 +376,7 @@ class Tank(pygame.sprite.Sprite):
                     s_phi = self.phi + self.phi_rel
                     s_x0 = self.x + self.canon_len * math.sin(math.radians(s_phi))
                     s_y0 = self.y + self.canon_len * math.cos(math.radians(s_phi))
-                    self.tshell_list.append(Tankshell(self.im_tshell, s_x0, s_y0, s_phi, self.TSHELL_SPEED))
+                    self.tshell_list.append(TankShell(self.im_tshell, s_x0, s_y0, s_phi, self.TSHELL_SPEED))
                     self.shoot_delay = 0
             # Gun cooldown updater
             if self.shoot_delay > self.GUN_COOLDOWN:
@@ -531,10 +607,9 @@ def main():
     last_millis = 0
     # Objects
     for i in range(game.team_1_alive):
-        print("lol ", i)
-        game.team_1_list.append(Tank(200+(200*i), 100, 90, 0, "tank1.png", "turret1.png", 1))
+        game.team_1_list.append(Tank(200+(200*i), 100, 90, 0, "tank1.png", "turret1.png", "tank_shell.png",  1))
     for i in range(game.team_2_alive):
-        game.team_2_list.append(Tank(WIDTH-200-(200*i), HEIGHT-100, 180, 0, "tank2.png", "turret2.png", 0))
+        game.team_2_list.append(Tank(WIDTH-200-(200*i), HEIGHT-100, 180, 0, "tank2.png", "turret2.png", "tank_shell.png", 0))
 
     game.master_list = game.team_1_list + game.team_2_list
     
@@ -544,7 +619,7 @@ def main():
     run = True
     while run:
         # Get delta time
-        if (game.i_frame == game.target_frame) or (game.render_all_frames):
+        if game.dt_fixed is None:
             game.dt = last_millis/1000
         else:
             game.dt = game.dt_fixed
