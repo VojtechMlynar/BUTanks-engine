@@ -44,10 +44,6 @@ MAX_HEALTH = 5
 # Collision handling
 MAX_WALL_COLLISION_ITER = 20
 
-# WINDOW init
-pygame.init()
-WIN = pygame.display.set_mode((WIDTH, HEIGHT))
-
 # PATHS
 p = Path(__file__).parents[1]
 ASSETS_DIR = os.path.join(p,"assets")
@@ -98,8 +94,17 @@ class Game():
     """
 
     def __init__(self):
-        """Initializes Game class object with following attributes."""
+        """Initializes Game class object and pygame window."""
 
+        self.win_list = []
+
+        # WINDOW init
+        pygame.init()
+        self.WIN = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("BUTanks engine")
+
+
+    def init_round(self):
         # Settings
         self.target_capture_time = 5
         self.team_1_alive = TEAM_1
@@ -124,9 +129,65 @@ class Game():
         # Team lists
         self.team_1_list = []
         self.team_2_list = []
-        self.master_list = None
+
+        self.arena = None
+        self.fpsClock = None
+        self.last_millis = 0
+        self.run = False
+
+        self.arena = Arena(MAP_FILENAME)
+        self.fpsClock = pygame.time.Clock()
+        # Objects
+        for i in range(self.team_1_alive):
+            self.team_1_list.append(Tank(100+(100*i), 100, 0, 0, "tank_1.png", "turret_1.png", "tank_shell_1.png",  1))
+        for i in range(self.team_2_alive):
+            self.team_2_list.append(Tank(WIDTH-100-(100*i), HEIGHT-100, 180, 0, "tank_2.png", "turret_2.png", "tank_shell_2.png", 1))
+
+        self.master_list = self.team_1_list + self.team_2_list
+        self.run = True
+
+    def get_delta_time(self):
+        
+        if self.dt_fixed is None:
+            self.dt = self.last_millis/1000
+        else:
+            self.dt = self.dt_fixed
+
+    def check_for_events(self):
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.run = False
+            if event.type == pygame.KEYDOWN:
+                for tank in self.master_list:
+                    tank.input(event.key, 1)
+            if event.type == pygame.KEYUP:
+                for tank in self.master_list:
+                    tank.input(event.key, 0)
+
+    def update(self):
+
+        for tank in self.master_list:
+            tank.update(self.dt)
+        # Check and resolve eventual collisions
+        handleCollisions(self.arena, self)
+
+    def draw(self):
+
+        if (self.i_frame == self.target_frame) or (self.render_all_frames):
+            self.WIN.fill(WHITE)
+            pygame.sprite.RenderPlain(self.arena).draw(self.WIN)
+            for tank in self.master_list:
+                tank.draw(self)
+            pygame.display.update()
+            self.i_frame = 0
+        else:
+            self.i_frame += 1
+
+
+
     
-    def checkState(self):
+    def check_state(self):
         """Check game conditions and eventually switch game state."""
         
         # Check if team had already captured area
@@ -141,6 +202,11 @@ class Game():
             print("TEAM 1 JUST DIED!")
         if self.team_2_alive == 0:
             print("TEAM 2 JUST DIED!")
+
+        if not self.run:
+            pygame.quit()
+
+        self.last_millis = self.fpsClock.tick(self.targetFPS)
 
 
 class Arena(pygame.sprite.Sprite):
@@ -493,15 +559,19 @@ class Tank(pygame.sprite.Sprite):
         self.y = -300
         self.moveAssets()
 
-    def draw(self):
-        """Draw tank and fired tank shells."""
+    def draw(self, game: Game):
+        """Draw tank and fired tank shells.
+        
+        Parameters:
+            game: Game class object.
+        """
 
         # Draw body
-        WIN.blit(self.im_body_rot, self.rect)
+        game.WIN.blit(self.im_body_rot, self.rect)
         # Draw fired tank shells
         for tshell in self.tshell_list:
-            WIN.blit(tshell.image, tshell.rect)
-        WIN.blit(self.im_turret_rot, self.turret_rect)           
+            game.WIN.blit(tshell.image, tshell.rect)
+        game.WIN.blit(self.im_turret_rot, self.turret_rect)           
 
 
 def handleCollisions(arena: Arena, game: Game):
@@ -619,7 +689,7 @@ def handleCollisions(arena: Arena, game: Game):
     # Main handleCollisions() sequence:
     combinations_list = itertools.combinations(game.master_list,2)
     for tank in game.master_list:
-        tankArenaCollision(arena, tank, game.dt)
+        tankArenaCollision(game.arena, tank, game.dt)
     for comb in combinations_list:
         tankToTankCollison(comb[0], comb[1])
     for tank in game.team_1_list:
@@ -634,70 +704,22 @@ def handleCollisions(arena: Arena, game: Game):
 
 # MAIN LOOP
 def main():
-    # init()
     game = Game()
-    pygame.display.set_caption("BUTanks engine")
-    fpsClock = pygame.time.Clock()
-    last_millis = 0
-    # Objects
-    for i in range(game.team_1_alive):
-        game.team_1_list.append(Tank(200+(200*i), 100, 90, 0, "tank1.png", "turret1.png", "tank_shell.png",  1))
-    for i in range(game.team_2_alive):
-        game.team_2_list.append(Tank(WIDTH-200-(200*i), HEIGHT-100, 180, 0, "tank2.png", "turret2.png", "tank_shell.png", 0))
+    # init()
+    game.init_round()
 
-    game.master_list = game.team_1_list + game.team_2_list
-    
-    arena = Arena(MAP_FILENAME)
-    # -------------------------------------------------------
-
-    # GAME LOOP
-    run = True
-    while run:
-        # get_delta_time()
-        if game.dt_fixed is None:
-            game.dt = last_millis/1000
-        else:
-            game.dt = game.dt_fixed
+    while game.run:
+        game.get_delta_time()
+        game.check_for_events()
         # -------------------------------------------------------
-
-        # Check for events (including input) - window, dev_mode
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                run = False
-            if event.type == pygame.KEYDOWN:
-                for tank in game.master_list:
-                    tank.input(event.key, 1)
-            if event.type == pygame.KEYUP:
-                for tank in game.master_list:
-                    tank.input(event.key, 0)
+        # AI INPUT (intern)
         # -------------------------------------------------------
-        # AI INPUT
-        # -------------------------------------------------------
-        # update()
-        for tank in game.master_list:
-            tank.update(game.dt)
-        # Check and resolve eventual collisions
-        handleCollisions(arena, game)
-        # -------------------------------------------------------
-        # draw()
-        if (game.i_frame == game.target_frame) or (game.render_all_frames):
-            WIN.fill(WHITE)
-            pygame.sprite.RenderPlain(arena).draw(WIN)
-            for tank in game.master_list:
-                tank.draw()
-            pygame.display.update()
-            game.i_frame = 0
-        else:
-            game.i_frame += 1
-        # -------------------------------------------------------
-        # checkState()
-        game.checkState()
-        last_millis = fpsClock.tick(game.targetFPS)
+        game.update()
+        game.draw()
+        game.check_state()
         # -------------------------------------------------------
         #  AI outpput
         # -------------------------------------------------------
-
-    pygame.quit()
 
 if __name__ == "__main__":
     main()
