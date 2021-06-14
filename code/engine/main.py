@@ -1,7 +1,6 @@
 import engine
 
 
-
 # MAIN LOOP
 def main():
     game = engine.Game()
