@@ -24,8 +24,6 @@ WIDTH, HEIGHT = 1000, 1000
 WHITE = (100,100,100)  # HACK Dark mode 
 
 # Game settings
-TEAM_1 = 1                # Number of Team 1 tanks
-TEAM_2 = 1                # Number of Team 2 tanks
 TARGET_CAPTURE_TIME = 5   # Time that must be spent in capture area [s]
 
 # Game rendering
@@ -98,22 +96,23 @@ class Game():
                 team_1_list + team_2_list created after their creation!  
     """
 
-    def __init__(self):
+    def __init__(self, win_size: tuple):
         """Initializes Game class object and pygame window."""
 
         self.win_list = []
 
         # WINDOW init
         pygame.init()
-        self.WIN = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.WIN = pygame.display.set_mode((win_size[0], win_size[1]))
         pygame.display.set_caption("BUTanks engine")
 
 
-    def init_round(self):
+    def init_round(self, team_1_spawn_list: list, team_2_spawn_list: list,
+                    map_filename: str, manual_input: bool = False):
+
+
         # Settings
         self.target_capture_time = 5
-        self.team_1_alive = TEAM_1
-        self.team_2_alive = TEAM_2
                 
         # Stats
         self.dt = 0
@@ -140,17 +139,25 @@ class Game():
         self.last_millis = 0
         self.run = False
 
-        self.arena = Arena(MAP_FILENAME)
+        self.manual_input = manual_input
+
+        self.arena = Arena(map_filename)
         self.fpsClock = pygame.time.Clock()
         # Objects
-        for i in range(self.team_1_alive):
-            self.team_1_list.append(Tank(100+(100*i), 100, 0, 0, "tank_1.png",
-                                        "turret_1.png", "tank_shell_1.png",  1))
-        for i in range(self.team_2_alive):
-            self.team_2_list.append(Tank(WIDTH-100-(100*i), HEIGHT-100, 180, 0,
-                           "tank_2.png", "turret_2.png", "tank_shell_2.png", 1))
+        for item in team_1_spawn_list:
+            self.team_1_list.append(Tank(item[0], item[1], item[2], 0, 
+                                        "tank_1.png", "turret_1.png", 
+                                        "tank_shell_1.png"))
+        for item in team_2_spawn_list:
+            self.team_2_list.append(Tank(item[0], item[1], item[2], 0,
+                                        "tank_2.png", "turret_2.png", 
+                                        "tank_shell_2.png"))
 
         self.master_list = self.team_1_list + self.team_2_list
+        
+        self.team_1_alive = len(team_1_spawn_list)
+        self.team_2_alive = len(team_2_spawn_list)
+        
         self.run = True
 
     def get_delta_time(self):
@@ -165,12 +172,13 @@ class Game():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.run = False
-            if event.type == pygame.KEYDOWN:
-                for tank in self.master_list:
-                    tank.input(event.key, 1)
-            if event.type == pygame.KEYUP:
-                for tank in self.master_list:
-                    tank.input(event.key, 0)
+            if self.manual_input:
+                if event.type == pygame.KEYDOWN:
+                    for tank in self.master_list:
+                        tank.input_manual(event.key, 1)
+                if event.type == pygame.KEYUP:
+                    for tank in self.master_list:
+                        tank.input_manual(event.key, 0)
 
     def update(self):
 
@@ -316,13 +324,13 @@ class TankShell(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center = (self.x, self.y))
         self.mask = pygame.mask.from_surface(self.image)
 
-#  TODO contorl_mode comment and add relative attribute comments
+
 class Tank(pygame.sprite.Sprite):
     """Tank object (most important of all)."""
 
     def __init__(self, pos0_x: float, pos0_y: float, phi0: float, 
                 phi_rel0: float, img_body: str, img_turret: str, 
-                img_tshell: str, cntrl_mode: int):
+                img_tshell: str):
         """
         Paramters:
             pos0_x: Initial center coordinate on x axis in pixels.
@@ -332,11 +340,9 @@ class Tank(pygame.sprite.Sprite):
             img_body: Tank body asset filename.
             img_turret: Tank turret asset filename.
             img_tshell: Tank shell asset filename.
-            cntrl_mode: [description]
         """
 
         super(Tank, self).__init__()
-        self.control_mode = cntrl_mode
         # Load resources
         self.im_body = pygame.image.load(os.path.join(IMGS_DIR,img_body))
         self.im_body.convert()
@@ -392,8 +398,8 @@ class Tank(pygame.sprite.Sprite):
         self.ant_points = np.zeros((self._ant_num, 2))
 
 
-    def input(self, key: pygame.key, key_event: int):
-        """Handles inputs
+    def input_manual(self, key: pygame.key, key_event: int):
+        """Handles manual inputs (primarly for checking game parameters).
 
         Parameters:
             key (pygame.event.key): pygame key associated with event 
@@ -402,40 +408,36 @@ class Tank(pygame.sprite.Sprite):
         
         if self.destroyedFlag:
             return
-
-        if self.control_mode == 0:
-            a = 0
-        elif self.control_mode == 1:
-            if key_event == 1:
-                if key == pygame.K_LEFT:
-                    self.phi_in = 1
-                elif key == pygame.K_RIGHT:
-                    self.phi_in = -1
-                elif key == pygame.K_UP:
-                    self.v_in = 1
-                elif key == pygame.K_DOWN:
-                    self.v_in = -1
-                elif key == pygame.K_i:
-                    self.phi_rel_in = 1
-                elif key == pygame.K_p:
-                    self.phi_rel_in = -1
-                elif key == pygame.K_o:
-                    self.shoot = 1
-            else:
-                if key == pygame.K_LEFT:
-                    self.phi_in = 0
-                elif key == pygame.K_RIGHT:
-                    self.phi_in = 0
-                elif key == pygame.K_UP:
-                    self.v_in = 0
-                elif key == pygame.K_DOWN:
-                    self.v_in = 0
-                elif key == pygame.K_i:
-                    self.phi_rel_in = 0
-                elif key == pygame.K_p:
-                    self.phi_rel_in = 0
-                elif key == pygame.K_o:
-                    self.shoot = 0
+        if key_event == 1:
+            if key == pygame.K_LEFT:
+                self.phi_in = 1
+            elif key == pygame.K_RIGHT:
+                self.phi_in = -1
+            elif key == pygame.K_UP:
+                self.v_in = 1
+            elif key == pygame.K_DOWN:
+                self.v_in = -1
+            elif key == pygame.K_i:
+                self.phi_rel_in = 1
+            elif key == pygame.K_p:
+                self.phi_rel_in = -1
+            elif key == pygame.K_o:
+                self.shoot = 1
+        else:
+            if key == pygame.K_LEFT:
+                self.phi_in = 0
+            elif key == pygame.K_RIGHT:
+                self.phi_in = 0
+            elif key == pygame.K_UP:
+                self.v_in = 0
+            elif key == pygame.K_DOWN:
+                self.v_in = 0
+            elif key == pygame.K_i:
+                self.phi_rel_in = 0
+            elif key == pygame.K_p:
+                self.phi_rel_in = 0
+            elif key == pygame.K_o:
+                self.shoot = 0
 
     def inputAI(self, inputs):
         """AI control input method 
@@ -639,11 +641,11 @@ class Tank(pygame.sprite.Sprite):
 
         # TODO: If debug state
         # Draw distance measuring lines
-        for i in range(0,self._ant_num):
-            xt = self.ant_points[i,0]
-            yt = self.ant_points[i,1]
-            pygame.draw.line(game.WIN, (255, 0, 0), 
-                (self.x, self.y), (xt, yt), 1)         
+        # for i in range(0,self._ant_num):
+        #     xt = self.ant_points[i,0]
+        #     yt = self.ant_points[i,1]
+        #     pygame.draw.line(game.WIN, (255, 0, 0), 
+        #         (self.x, self.y), (xt, yt), 1)         
 
 def handleCollisions(arena: Arena, game: Game):
     """Handle collisons between all relevant Sprites (objects).
@@ -776,9 +778,12 @@ def handleCollisions(arena: Arena, game: Game):
 
 # MAIN LOOP
 def main():
-    game = Game()
+    game = Game((WIDTH, HEIGHT))
     # init()
-    game.init_round()
+    t1 = [(100, 100, 0),
+          (200, 100, 90)]
+    t2 = [(100, 100, 0), (200, 100, 90)]
+    game.init_round(t1, t2, MAP_FILENAME, True)
 
     while game.run:
         game.get_delta_time()
@@ -792,6 +797,7 @@ def main():
         # -------------------------------------------------------
         #  AI outpput
         # -------------------------------------------------------
+        # print("FPS: ", (1/(game.last_millis/1000)))
 
 if __name__ == "__main__":
     main()
