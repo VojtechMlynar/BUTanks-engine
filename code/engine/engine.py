@@ -1,4 +1,7 @@
-""" BUTanks engine v0.0.75 - dev_DB branch
+""" BUTanks engine v0.0.8 - dev_DB branch
+
+Build on Python 3.9.1 and Pygame 2.0.1.
+Python 3.6+ required.
 
 TODO:
 [x] Suitable for more than 1v1
@@ -15,6 +18,7 @@ import math
 import itertools
 import numpy as np
 import pygame
+import sys
 import tanks_utility as tu
 from pathlib import Path
 
@@ -25,6 +29,7 @@ WHITE = (100,100,100)  # HACK Dark mode
 
 # Game settings
 TARGET_CAPTURE_TIME = 5   # Time that must be spent in capture area [s]
+NUM_OF_ROUNDS = 4
 
 # Game rendering
 TARGET_FPS = 60           # Set very high for non graphic learning (e.g. 10000)
@@ -96,15 +101,21 @@ class Game():
                 team_1_list + team_2_list created after their creation!  
     """
 
-    def __init__(self, win_size: tuple):
+    def __init__(self, window_size: tuple, num_of_rounds: int = 1):
         """Initializes Game class object and pygame window."""
 
+        self.num_of_rounds = num_of_rounds
         self.win_list = []
+        self.quit_Flag = 0
+        self.quit = 0
+
+        self.i_round = 1
 
         # WINDOW init
         pygame.init()
-        self.WIN = pygame.display.set_mode((win_size[0], win_size[1]))
+        self.WIN = pygame.display.set_mode((window_size[0], window_size[1]))
         pygame.display.set_caption("BUTanks engine")
+        print("BUTanks engine initializing... Have fun!\n")
 
 
     def init_round(self, team_1_spawn_list: list, team_2_spawn_list: list,
@@ -118,11 +129,14 @@ class Game():
         self.dt = 0
         self.team_1_capture_time = 0
         self.team_2_capture_time = 0
+        self.win_team = None
 
         # State related
         self.team_1_captured_flag = False
         self.team_2_captured_flag = False
-        
+        self.team_1_destroyed_flag = False
+        self.team_2_destroyed_flag = False
+
         # Rendering
         self.targetFPS = TARGET_FPS
         self.render_all_frames = RENDER_ALL_FRAMES
@@ -137,8 +151,9 @@ class Game():
         self.arena = None
         self.fpsClock = None
         self.last_millis = 0
-        self.run = False
+        self.round_run = False
 
+        self.render_antenas = False
         self.manual_input = manual_input
 
         self.arena = Arena(map_filename)
@@ -158,7 +173,9 @@ class Game():
         self.team_1_alive = len(team_1_spawn_list)
         self.team_2_alive = len(team_2_spawn_list)
         
-        self.run = True
+        self.round_run = True
+        print(f'Round {self.i_round}', 
+              f'({self.team_1_alive}v{self.team_2_alive}):')
 
     def get_delta_time(self):
         
@@ -171,7 +188,15 @@ class Game():
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                self.run = False
+                self.quit_Flag = True
+                self.round_run = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_a:
+                    if self.render_antenas:
+                        self.render_antenas = False
+                    else:
+                        self.render_antenas = True
+
             if self.manual_input:
                 if event.type == pygame.KEYDOWN:
                     for tank in self.master_list:
@@ -205,18 +230,51 @@ class Game():
         # Check if team had already captured area
         if self.team_1_capture_time >= self.target_capture_time:
             self.team_1_captured_flag = True
-            print("TEAM 1 JUST CAPTURED AREA!")
+            print("Team 1 captured area!")
         if self.team_2_capture_time >= self.target_capture_time:
             self.team_2_captured_flag = True
-            print("TEAM 2 JUST CAPTURED AREA!")
+            print("Team 2 captured area!")
         # Check if whole team is destroyded
         if self.team_1_alive == 0:
-            print("TEAM 1 JUST DIED!")
+            self.team_1_destroyed_flag = True
+            print("- Team 1 destroyed!")
         if self.team_2_alive == 0:
-            print("TEAM 2 JUST DIED!")
+            self.team_2_destroyed_flag = True
+            print("- Team 2 destroyed!")
 
-        if not self.run:
+        if self.team_1_captured_flag and self.team_2_captured_flag:
+            self.win_team = 0  # Tie
+        elif self.team_1_captured_flag:
+            self.win_team = 1
+        elif self.team_2_captured_flag:
+            self.win_team = 2
+
+        if self.team_1_destroyed_flag and self.team_2_destroyed_flag:
+            self.win_team = 0  # Tie
+        elif self.team_1_destroyed_flag:
+            self.win_team = 2
+        elif self.team_2_destroyed_flag:
+            self.win_team = 1
+
+        if self.win_team is not None:
+            self.win_list.append(self.win_team)
+            if self.win_team == 0:
+                win_str = "Round ended in a tie!\n"
+            else:
+                win_str = f'Team {self.win_team} won!\n'
+            print(win_str)
+            self.round_run = False
+
+            if self.i_round == self.num_of_rounds:
+                self.quit_Flag = True
+            else:
+                self.i_round += 1
+
+        if self.quit_Flag:
             pygame.quit()
+            print("Final win list (0 = Tie): ", self.win_list)
+            print("Quitting.\n")
+            return
 
         self.last_millis = self.fpsClock.tick(self.targetFPS)
 
@@ -351,12 +409,10 @@ class Tank(pygame.sprite.Sprite):
         self.im_turret.convert()
         self.im_tshell = pygame.image.load(os.path.join(IMGS_DIR,img_tshell))
         self.im_tshell.convert()
-        self.canon_len = self.im_turret.get_height()/2
+        self.canon_len = self.im_turret.get_height()/3
         # Initial positions
         self.x = pos0_x
         self.y = pos0_y
-        #self.xm = pos0_x + round(self.w/2)
-        #self.ym = pos0_y + round(self.h/2)
         self.phi = phi0
         self.phi_rel = phi_rel0
         # Properties
@@ -391,7 +447,7 @@ class Tank(pygame.sprite.Sprite):
         self.capturedFlag = False
         self.destroyedFlag = False
         # Tank antennas
-        self._ant_num = 18
+        self._ant_num = 3
         self.antennas = np.linspace(
             0, 2*np.pi - (2*np.pi/self._ant_num), self._ant_num)
         self.ant_distances = np.zeros(self._ant_num)
@@ -481,7 +537,7 @@ class Tank(pygame.sprite.Sprite):
                 self.antennas[i] + phi_rad, env.LOS_mask)
             self.ant_points[i] = np.array([xt, yt], ndmin=2)
 
-    def update(self, dt, env: Arena, mode = 0):
+    def update(self, dt, arena: Arena, mode: int = 0):
         """Update tank related assets based on input and time step.
 
         Parameters:
@@ -498,6 +554,7 @@ class Tank(pygame.sprite.Sprite):
         if mode == 0:
             # Handle shooting
             if self.shoot == 1:
+                # Shoot new tank shell
                 if self.shoot_delay >= self.GUN_COOLDOWN:
                     s_phi = self.phi + self.phi_rel
                     s_x0 = self.x + self.canon_len \
@@ -536,15 +593,18 @@ class Tank(pygame.sprite.Sprite):
 
         if mode == 0:
             self.phi_rel += self.TURRET_TURN_SPEED*self.phi_rel_in *dt
-        self.measureDistances(env)
+            self.measureDistances(arena)
         self.moveAssets()
 
-    def revertToLast(self):
+    def revertToLast(self, arena:Arena):
         """Revert position attributes to last saved."""
 
         self.x = self.last_x
         self.y = self.last_y
         self.phi = self.last_phi
+        self.measureDistances(arena)
+        self.moveAssets()
+
 
     def wallCollision(self, map: Arena, dt: float):
         """Advaced handling of collision with walls.
@@ -614,8 +674,7 @@ class Tank(pygame.sprite.Sprite):
             self.last_x = last_x
             self.last_y = last_y
             self.last_phi = last_phi
-            self.revertToLast()
-            self.moveAssets()
+            self.revertToLast(map)
 
     def destroy(self):
         """Set destroyedFlag attribute and move tank out of window."""
@@ -639,13 +698,16 @@ class Tank(pygame.sprite.Sprite):
             game.WIN.blit(tshell.image, tshell.rect)
         game.WIN.blit(self.im_turret_rot, self.turret_rect)           
 
-        # TODO: If debug state
-        # Draw distance measuring lines
-        # for i in range(0,self._ant_num):
-        #     xt = self.ant_points[i,0]
-        #     yt = self.ant_points[i,1]
-        #     pygame.draw.line(game.WIN, (255, 0, 0), 
-        #         (self.x, self.y), (xt, yt), 1)         
+        if game.render_antenas:
+            if self.destroyedFlag:
+                return
+            # Draw distance measuring lines
+            for i in range(0,self._ant_num):
+                xt = self.ant_points[i,0]
+                yt = self.ant_points[i,1]
+                pygame.draw.line(game.WIN, (255, 0, 0), 
+                    (self.x, self.y), (xt, yt), 1)     
+
 
 def handleCollisions(arena: Arena, game: Game):
     """Handle collisons between all relevant Sprites (objects).
@@ -671,13 +733,18 @@ def handleCollisions(arena: Arena, game: Game):
         col = pygame.sprite.collide_mask(tank, arena)
         if col is not None:
             tank.wallCollision(arena, dt)
+            # Prevent wall penetration in tank to tank collision handling
+            tank.last_x = tank.x
+            tank.last_y = tank.y
+            tank.last_phi = tank.phi
 
-    def tankToTankCollison(tank1: Tank, tank2: Tank):
+    def tankToTankCollison(tank1: Tank, tank2: Tank, arena: Arena):
         """Handles collision between two Tanks.
 
         Parameters:
             tank1: Tank class object.
             tank2: Tank class object.
+            arena: Arena class object.
         """
 
         if tank1.destroyedFlag or tank2.destroyedFlag:
@@ -685,10 +752,8 @@ def handleCollisions(arena: Arena, game: Game):
         # Check for collision
         col = pygame.sprite.collide_mask(tank1, tank2)
         if col is not None:
-            tank1.revertToLast()
-            tank2.revertToLast()
-            tank1.moveAssets()
-            tank2.moveAssets()                
+            tank1.revertToLast(arena)
+            tank2.revertToLast(arena)               
 
     def shellCollisions(arena: Arena, game: Game, tank: Tank,
                         opposing_team: int):
@@ -724,10 +789,10 @@ def handleCollisions(arena: Arena, game: Game):
                         opposing_tank.destroy()
                         if opposing_team == 1:
                             game.team_1_alive -= 1
-                            print("Team 1 tank destroyed.")
+                            print("-- Team 1 tank destroyed.")
                         elif opposing_team == 2:
-                            game.team_2_alive -= 2
-                            print("Team 2 tank destroyed.")
+                            game.team_2_alive -= 1
+                            print("-- Team 2 tank destroyed.")
                 else:
                     shell_list2.append(shell)
             tank.tshell_list = shell_list2       
@@ -765,7 +830,7 @@ def handleCollisions(arena: Arena, game: Game):
     for tank in game.master_list:
         tankArenaCollision(game.arena, tank, game.dt)
     for comb in combinations_list:
-        tankToTankCollison(comb[0], comb[1])
+        tankToTankCollison(comb[0], comb[1], game.arena)
     for tank in game.team_1_list:
         shellCollisions(arena, game, tank, 2)
     for tank in game.team_2_list:
@@ -778,26 +843,28 @@ def handleCollisions(arena: Arena, game: Game):
 
 # MAIN LOOP
 def main():
-    game = Game((WIDTH, HEIGHT))
+    game = Game((WIDTH, HEIGHT), NUM_OF_ROUNDS)
     # init()
     t1 = [(100, 100, 0),
-          (200, 100, 90)]
-    t2 = [(100, 100, 0), (200, 100, 90)]
-    game.init_round(t1, t2, MAP_FILENAME, True)
+          (200, 100, 0)]
+    t2 = [(WIDTH-100, HEIGHT-100, 180)]
 
-    while game.run:
-        game.get_delta_time()
-        game.check_for_events()
-        # -------------------------------------------------------
-        # AI INPUT (intern)
-        # -------------------------------------------------------
-        game.update()
-        game.draw()
-        game.check_state()
-        # -------------------------------------------------------
-        #  AI outpput
-        # -------------------------------------------------------
-        # print("FPS: ", (1/(game.last_millis/1000)))
+    while not game.quit_Flag:
+        game.init_round(t1, t2, MAP_FILENAME, True)
+        game.render_antenas = True  # Debug
+        while game.round_run:
+            game.get_delta_time()
+            game.check_for_events()
+            # -------------------------------------------------------
+            # INPUT
+            # -------------------------------------------------------
+            game.update()
+            game.draw()
+            game.check_state()
+            # -------------------------------------------------------
+            #  OUTPUT
+            # -------------------------------------------------------
+            # print("FPS: ", (1/(game.last_millis/1000)))
 
 if __name__ == "__main__":
     main()
