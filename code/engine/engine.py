@@ -1,4 +1,4 @@
-""" BUTanks engine v0.1.0 - dev_DB branch
+"""BUTanks engine v0.1.1 - dev_DB branch RAI 2021
 
 Build on Python 3.9.1 and Pygame 2.0.1.
 Python 3.6+ required.
@@ -78,10 +78,8 @@ ASSETS_DIR = os.path.join(p,"assets")
 MAPS_DIR = os.path.join(ASSETS_DIR,"maps")
 IMGS_DIR = os.path.join(ASSETS_DIR,"images")
 
-# Deafault window size (is reset when loading Arena)
-WIDTH, HEIGHT = 1000, 1000
-
 # Only for running this exact py:
+WIDTH, HEIGHT = 1000, 1000
 MAP_FILENAME = "map1.png"
 NUM_OF_ROUNDS = 4
 
@@ -173,10 +171,13 @@ class Game():
                 For parameter testing.
     """
 
-    def __init__(self, num_of_rounds: int = 1):
+    def __init__(self, map_filename: str, window_size: tuple, 
+                 num_of_rounds: int = 1):
         """
         Parameters:
             num_of_rounds: Number of game rounds. Defaults to 1.
+            map_filename: Arena image filename.
+            window_size: Size of window as (width,height) in pixels.
         """
 
         self.num_of_rounds = num_of_rounds
@@ -185,21 +186,20 @@ class Game():
         self._i_round = 1
         # Window init
         pygame.init()
-        self.WINDOW = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.WINDOW = pygame.display.set_mode((window_size[0],window_size[1]))
+        self.arena = Arena(map_filename, window_size)
         pygame.display.set_caption("BUTanks engine")
         print("BUTanks engine initializing... Have fun!\n")
 
     def init_round(self, team_1_spawn_list: list, team_2_spawn_list: list,
-                   target_capture_time: float, map_filename: str, 
-                   window_size: tuple):
+                   target_capture_time: float, tank_scale: float = 1):
         """Initizes game round and sets/resets all attributes needed.
 
         Parameters:
             team_1_spawn_list: List of tuples with spawn cordinates (x, y, phi).
             team_2_spawn_list: List of tuples with spawn cordinates (x, y, phi).
             target_capture_time: Target capture are time in seconds.
-            map_filename: Arena image filename.
-            window_size: Size of window as (width,height) in pixels.
+            tank_scale: Scale of all tanks. Defaults to 1 (optional).
         """
 
         # Stats attributes
@@ -225,8 +225,6 @@ class Game():
         self.last_millis = 0
         self.round_run_flag = False
         # Critical attributes
-        self.WINDOW = pygame.display.set_mode((window_size[0],window_size[1]))
-        self.arena = Arena(map_filename, window_size)
         self._fps_clock = pygame.time.Clock()
         # Other attributes
         self.render_antennas_flag = False
@@ -236,11 +234,11 @@ class Game():
         for item in team_1_spawn_list:
             self.team_1_list.append(Tank(item[0], item[1], item[2], 0, 
                                         "tank_1.png", "turret_1.png", 
-                                        "tank_shell_1.png"))
+                                        "tank_shell_1.png",tank_scale))
         for item in team_2_spawn_list:
             self.team_2_list.append(Tank(item[0], item[1], item[2], 0,
                                         "tank_2.png", "turret_2.png", 
-                                        "tank_shell_2.png"))
+                                        "tank_shell_2.png",tank_scale))
         self.master_list = self.team_1_list + self.team_2_list
         # Set remaining attributes
         self.team_1_alive = len(team_1_spawn_list)
@@ -290,14 +288,24 @@ class Game():
             tank.update(self.dt, self.arena)
         handle_collisions(self.arena, self)
 
-    def draw(self):
-        """Draw all objects into game frame."""
-
+    def draw_background(self):
+        """Draws background (arena) into buffered frame."""
+        
         if (self._i_frame == self.target_frame) or (self.render_all_frames):
             self.WINDOW.fill(MAP_BACKGROUND_COLOR)
             pygame.sprite.RenderPlain(self.arena).draw(self.WINDOW)
+
+    def draw_tanks(self):
+        """Draws tank related objects into buffered frame."""
+        
+        if (self._i_frame == self.target_frame) or (self.render_all_frames):
             for tank in self.master_list:
                 tank.draw(self)
+
+    def update_frame(self):
+        """Draws buffered frame (flip frame)."""
+
+        if (self._i_frame == self.target_frame) or (self.render_all_frames):
             pygame.display.update()
             self._i_frame = 0
         else:
@@ -521,7 +529,7 @@ class Tank(pygame.sprite.Sprite):
 
     def __init__(self, pos0_x: float, pos0_y: float, phi0: float, 
                 phi_rel0: float, img_body: str, img_turret: str, 
-                img_tshell: str):
+                img_tshell: str, scale: float = 1):
         """
         Paramters:
             pos0_x: Initial center coordinate on x axis in pixels.
@@ -535,13 +543,27 @@ class Tank(pygame.sprite.Sprite):
         """
 
         super(Tank, self).__init__()
+        self.scale = scale
         # Load resources
         self.im_body = pygame.image.load(os.path.join(IMGS_DIR,img_body))
-        self.im_body.convert()
-        self.w, self.h = self.im_body.get_size()
         self.im_turret = pygame.image.load(os.path.join(IMGS_DIR,img_turret))
-        self.im_turret.convert()
         self.im_tshell = pygame.image.load(os.path.join(IMGS_DIR,img_tshell))
+        if self.scale != 1:
+            w, h = self.im_body.get_size()
+            self.im_body = pygame.transform.scale(self.im_body,
+                                                  (int(w*self.scale),
+                                                   int(h*self.scale)))
+            w, h = self.im_turret.get_size()
+            self.im_turret = pygame.transform.scale(self.im_turret,
+                                                    (int(w*self.scale),
+                                                     int(h*self.scale)))
+            w, h = self.im_tshell.get_size()
+            self.im_tshell = pygame.transform.scale(self.im_tshell,
+                                                   (int(w*self.scale),
+                                                    int(h*self.scale)))
+        self.w, self.h = self.im_body.get_size()
+        self.im_body.convert()
+        self.im_turret.convert()
         self.im_tshell.convert()
         self.canon_len = self.im_turret.get_height()/3
         # Initial positions
@@ -556,6 +578,10 @@ class Tank(pygame.sprite.Sprite):
         self.TURRET_TURN_SPEED = TURRET_TURN_SPEED
         self.TSHELL_SPEED = TSHELL_SPEED
         self.GUN_COOLDOWN = GUN_COOLDOWN
+        if self.scale != 1:
+            self.FORWARD_SPEED = FORWARD_SPEED * self.scale
+            self.BACKWARD_SPEED = BACKWARD_SPEED * self.scale
+            self.TSHELL_SPEED = TSHELL_SPEED * self.scale
         # Controls
         self.phi_in = 0
         self.v_in = 0
@@ -669,7 +695,10 @@ class Tank(pygame.sprite.Sprite):
         Parameters:
             arena: Arena class object.
         """
-
+        if self.phi > 360:
+                self.phi = self.phi - 360*(self.phi // 360)
+        elif self.phi < 0:
+                self.phi = self.phi - 360*(self.phi // 360)
         phi_rad = math.radians(self.phi)
         for i in range(0,self.ant_num):
             self.ant_distances[i],xt ,yt = tu.cast_line(
@@ -728,11 +757,6 @@ class Tank(pygame.sprite.Sprite):
         self.phi += turn_speed*self.phi_in *dt
         if mode == 0:
             self.phi_rel += self.TURRET_TURN_SPEED*self.phi_rel_in *dt
-            if self.phi > 360:
-                self.phi = self.phi - 360*(self.phi // 360)
-            elif self.phi < 0:
-                self.phi = self.phi - 360*(self.phi // 360)
-            self.measure_distances(arena)
         self.move_assets()
 
     def revert_to_last(self, arena:Arena):
@@ -741,7 +765,6 @@ class Tank(pygame.sprite.Sprite):
         self.x = self.last_x
         self.y = self.last_y
         self.phi = self.last_phi
-        self.measure_distances(arena)
         self.move_assets()
 
 
@@ -978,22 +1001,24 @@ def handle_collisions(arena: Arena, game: Game):
         capture_area_check(arena, tank1, 1, game)
     for tank2 in game.team_2_list:
         capture_area_check(arena, tank2, 2, game)
+    for tank in game.master_list:
+        # Update antennas
+        tank.measure_distances(arena)
         
 
 # MAIN LOOP
 def main():
-    game = Game(NUM_OF_ROUNDS)
+    game = Game(MAP_FILENAME, (WIDTH,HEIGHT), NUM_OF_ROUNDS)
+    
     # init()
-    map_size = (1000,1000)
     t1 = [(100,100,0)]
-    t2 = [(map_size[0]-100,map_size[1]-100,180)]
+    t2 = [(WIDTH-100,HEIGHT-100,180)]
 
     while not game.quit_flag:
         game.init_round(team_1_spawn_list=t1,
                         team_2_spawn_list=t2,
-                        map_filename=MAP_FILENAME,
                         target_capture_time=5,
-                        window_size=map_size)
+                        tank_scale=1)
         # Debug:
         game.render_antennas_flag = True  
         game.manual_input_flag = True
@@ -1006,7 +1031,11 @@ def main():
             # INPUT game.inputAI()
             # -------------------------------------------------------
             game.update()
-            game.draw()
+            game.draw_background()
+            # Place to draw under tanks
+            game.draw_tanks()
+            # Plac to draw on top of tanks
+            game.update_frame()
             game.check_state()
             # -------------------------------------------------------
             #  OUTPUT
