@@ -237,23 +237,32 @@ class Arena(pygame.sprite.Sprite):
         w, h = self.image.get_size()
 
         # load image and create weights array
-        self.weights_scale = WIDTH/w
-        self.weights = pygame.surfarray.array_alpha(self.image)
-        self.weights[np.where(self.weights < 255)] = 0
-        self.weights = self.weights.astype(np.float32)
+        self.res_scale = WIDTH/w
+        self.alpha_arr = pygame.surfarray.array_alpha(self.image)
+        self.obstacles_bin = self.alpha_arr.copy()
+        self.obstacles_bin[np.where(self.obstacles_bin < 255)] = 0
+        self.obstacles_bin[np.where(self.obstacles_bin == 255)] = 1
+        self.obstacles_bin = self.obstacles_bin.astype(np.float32)
 
         # dilate image to get safety navigation margin
-        dil = math.ceil(NAV_MARGIN/self.weights_scale)
-        dilated = tu.dilate_image(self.weights, dil, "max")
-        self.weights_scaled = tu.resize_image(dilated, WIDTH, HEIGHT) 
-        obstacles = np.where(dilated != 0)
-        self.weights[obstacles[0], obstacles[1]] = np.inf
-        self.weights += 1 # For astar search - lowest value is 1
+        dil = math.ceil(NAV_MARGIN/self.res_scale)
+        self.obstacles_dil = tu.dilate_image(self.obstacles_bin, dil, "max")
+        self.dilated_scaled = tu.resize_image(self.obstacles_dil, WIDTH, HEIGHT) 
+        # obstacles = np.where(self.d != 0)
+        # self.weights[obstacles[0], obstacles[1]] = np.inf
+        #self.weights += 1 # For astar search - lowest value is 1
+
+        # extract capture area
+        self.capture_area_mask = self.alpha_arr.copy()
+        self.capture_area_mask[np.where(
+            (self.capture_area_mask > 250))] = 0
+        self.capture_area_mask[np.where( 
+            (self.capture_area_mask > 10))] = 1
 
         self.image = pygame.transform.scale(self.image,(WIDTH,HEIGHT))
         self.rect = self.image.get_rect()
         self.LOS_mask = pygame.surfarray.array_alpha(self.image)
-        self.LOS_mask[np.where(self.LOS_mask < 255)] = 0
+        self.LOS_mask[np.where(self.LOS_mask < 255)] = 0        
         self.mask = pygame.mask.from_surface(self.image, 254)
         self.switch = False
         self.CaptureArea = CaptureArea(self)
@@ -385,9 +394,10 @@ class Tank(pygame.sprite.Sprite):
         self.capturedFlag = False
         self.destroyedFlag = False
         # Tank antennas
-        self._ant_num = 18
+        self._ant_num = 10
         self.antennas = np.linspace(
             0, 2*np.pi - (2*np.pi/self._ant_num), self._ant_num)
+        self.antennas += np.pi/2
         self.ant_distances = np.zeros(self._ant_num)
         self.ant_points = np.zeros((self._ant_num, 2))
 
@@ -476,7 +486,7 @@ class Tank(pygame.sprite.Sprite):
         for i in range(0,self._ant_num):
             self.ant_distances[i],xt ,yt = tu.cast_line(
                 self.x, self.y, 
-                self.antennas[i] + phi_rad, env.LOS_mask)
+                self.antennas[i] - phi_rad, env.LOS_mask)
             self.ant_points[i] = np.array([xt, yt], ndmin=2)
 
     def update(self, dt, env: Arena, mode = 0):
@@ -530,7 +540,7 @@ class Tank(pygame.sprite.Sprite):
         if self.phi > 360:
             self.phi = self.phi - 360*(self.phi // 360)
         elif self.phi < 0:
-            self.phi = self.phi + 360*(1 - (self.phi // 360))
+            self.phi = self.phi - 360*(self.phi // 360)
 
         if mode == 0:
             self.phi_rel += self.TURRET_TURN_SPEED*self.phi_rel_in *dt

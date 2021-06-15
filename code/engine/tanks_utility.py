@@ -87,69 +87,43 @@ def cast_line(x0, y0, phi, env, stride = 15):
     if phi > 2*np.pi:
         phi = phi - 2*np.pi*(phi // (2*np.pi))
     elif phi < 0:
-        phi = phi + 2*np.pi*(1-(phi // (2*np.pi)))
+        phi = phi - 2*np.pi*(phi // (2*np.pi))
 
     x = round(x0)
     y = round(y0) 
 
     i = 0
     k = np.math.tan(phi)
-    
+
     if abs(k) > 1: # Y axis is primary
         while (env[x,y] == 0):
-            if is_close(1/k, 0, 1e-3) is True:
-                if is_close(phi, np.pi/2, 1e-3) is True:
-                    y += stride
-                else:
-                    y -= stride
+            if (phi > 0) & (phi < np.pi):
+                y += stride
             else:
-                if (phi > np.pi/2) and (phi < np.pi*3/2):
-                    y -= stride
-                else:
-                    y += stride
+                y -= stride
             
             x = round(x0 + 1/k*(y-y0))
-            i += 1
         # Backstepping
         while (env[x, y] != 0):
-            if is_close(1/k, 0, 1e-3) is True:
-                if is_close(phi, np.pi/2, 1e-3) is True:
-                    y -= 1
-                else:
-                    y += 1
+            if (phi > 0) & (phi < np.pi):
+                y -= 1
             else:
-                if (phi > np.pi/2) and (phi < np.pi*3/2):
-                    y += 1
-                else:
-                    y -= 1
-            
+                y += 1
             x = round(x0 + 1/k*(y-y0))
-            i += 1
+
     else: # X axis is primary
         while (env[round(x),round(y)] == 0):
-            if is_close(k, 0, 1e-3) is True:
-                if is_close(phi, 0, 1e-3) is True:
-                    x += stride
-                else:
-                    x -= stride
+            if (phi > np.pi*3/2) | (phi < np.pi/2):
+                x += stride
             else:
-                if (phi > 0) and (phi < np.pi):
-                    x += stride
-                else:
-                    x -= stride
+                x -= stride 
             y = round(y0 + k*(x-x0))
         # Backstepping
         while (env[round(x),round(y)] != 0):
-            if is_close(k, 0, 1e-3) is True:
-                if is_close(phi, 0, 1e-3) is True:
-                    x -= 1
-                else:
-                    x += 1
+            if (phi > np.pi*3/2) | (phi < np.pi/2):
+                x -= 1
             else:
-                if (phi > 0) and (phi < np.pi):
-                    x -= 1
-                else:
-                    x += 1
+                x += 1 
             y = round(y0 + k*(x-x0))
 
     dist = np.sqrt((x-x0)**2 + (y-y0)**2)
