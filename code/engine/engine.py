@@ -1,4 +1,4 @@
-""" BUTanks engine v0.0.9 - dev_DB branch
+""" BUTanks engine v0.1.0 - dev_DB branch
 
 Build on Python 3.9.1 and Pygame 2.0.1.
 Python 3.6+ required.
@@ -17,15 +17,6 @@ Manual control keybinds:
 - Turn canon left --- 'i' key
 - Shoot ------------- 'o' key
 - Turn canon right -- 'p' key
-
-TODO:
-[x] Suitable for more than 1v1
-[x] Understand fixed dt (for learning alghorithms)
-[x] Display game stats
-[x] Game states
-[x] I/O and its link with AI - OUTPUT will be external
-[x] Comments
-[x] Clean 
 """ 
 
 import os
@@ -62,7 +53,7 @@ FIXED_DT = None           # None for graphic mode
 # ------------------------------------------------------------------------------
 
 # Game settings
-MAP_BACKGROUND_COLOR = (100,100,100)  # HACK Dark mode 
+MAP_BACKGROUND_COLOR = (100,100,100)
 TARGET_CAPTURE_TIME = 5   # Time that must be spent in the capture area [s]
 
 # Tank settings
@@ -73,6 +64,7 @@ TURRET_TURN_SPEED = 250  # [deg/s]
 TSHELL_SPEED = 350       # [px/s]
 GUN_COOLDOWN = 1         # [s]
 MAX_HEALTH = 5
+NUM_OF_ANTENNAS = 10
 
 # Collision handling
 MAX_WALL_COLLISION_ITER = 20
@@ -94,7 +86,6 @@ MAP_FILENAME = "map1.png"
 NUM_OF_ROUNDS = 4
 
 
-# TODO: Check comments esp: (i_frame, master_list)
 class Game():
     """Game object holds important data for proper game function.
 
@@ -174,7 +165,7 @@ class Game():
             arena: Arena
                 Arena class object (specifies map - walls and capture area).
 
-            render_antenas_flag: bool
+            render_antennas_flag: bool
                 If true antena lines will be rendered.
 
             manual_input_flag: bool
@@ -238,7 +229,7 @@ class Game():
         self.arena = Arena(map_filename, window_size)
         self._fps_clock = pygame.time.Clock()
         # Other attributes
-        self.render_antenas_flag = False
+        self.render_antennas_flag = False
         self.manual_input_flag = False
         self._win_team = None
         # Populate team lists
@@ -278,17 +269,19 @@ class Game():
                 self.round_run_flag = False
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_a:
-                    if self.render_antenas_flag:
-                        self.render_antenas_flag = False
+                    if self.render_antennas_flag:
+                        self.render_antennas_flag = False
                     else:
-                        self.render_antenas_flag = True
+                        self.render_antennas_flag = True      
             if self.manual_input_flag:
                 if event.type == pygame.KEYDOWN:
                     for tank in self.master_list:
-                        tank.input_manual(event.key, 1)
+                        if tank.manual_control_flag:
+                            tank.input_manual(event.key, 1)
                 if event.type == pygame.KEYUP:
                     for tank in self.master_list:
-                        tank.input_manual(event.key, 0)
+                        for tank in self.master_list:
+                            tank.input_manual(event.key, 0)
 
     def update(self):
         """Update game objects and handle their collisions."""
@@ -382,7 +375,6 @@ class Arena(pygame.sprite.Sprite):
             Image must have non transparent walls and transparent background.    
         """
 
-        # FIXME: Astar preparation out!
         super(Arena, self).__init__()
         self.x = 0
         self.y = 0
@@ -390,22 +382,28 @@ class Arena(pygame.sprite.Sprite):
         self.image.convert_alpha()
         w, h = self.image.get_size()
         # Load image and create weights array
-        self.weights_scale = size[0]/w
-        self.weights = pygame.surfarray.array_alpha(self.image)
-        self.weights[np.where(self.weights < 255)] = 0
-        self.weights = self.weights.astype(np.float32)
+        self.res_scale = size[0]/w
+        self.alpha_arr = pygame.surfarray.array_alpha(self.image)
+        self.obstacles_bin = self.alpha_arr.copy()
+        self.obstacles_bin[np.where(self.obstacles_bin < 255)] = 0
+        self.obstacles_bin[np.where(self.obstacles_bin == 255)] = 1
+        self.obstacles_bin = self.obstacles_bin.astype(np.float32)
         # Dilate image to get safety navigation margin
-        dil = math.ceil(NAV_MARGIN/self.weights_scale)
-        dilated = tu.dilate_image(self.weights, dil, "max")
-        self.weights_scaled = tu.resize_image(dilated, size[0], size[1]) 
-        obstacles = np.where(dilated != 0)
-        self.weights[obstacles[0], obstacles[1]] = np.inf
-        self.weights += 1 # For astar search - lowest value is 1
+        dil = math.ceil(NAV_MARGIN/self.res_scale)
+        self.obstacles_dil = tu.dilate_image(self.obstacles_bin, dil, "max")
+        self.dilated_scaled = tu.resize_image(self.obstacles_dil,
+                                              size[0], size[1]) 
+        # Extract capture area
+        self.capture_area_mask = self.alpha_arr.copy()
+        self.capture_area_mask[np.where(
+            (self.capture_area_mask > 250))] = 0
+        self.capture_area_mask[np.where( 
+            (self.capture_area_mask > 10))] = 1
         # Main procedures
         self.image = pygame.transform.scale(self.image,(size[0],size[1]))
         self.rect = self.image.get_rect()
         self.LOS_mask = pygame.surfarray.array_alpha(self.image)
-        self.LOS_mask[np.where(self.LOS_mask < 255)] = 0
+        self.LOS_mask[np.where(self.LOS_mask < 255)] = 0        
         self.mask = pygame.mask.from_surface(self.image, 254)
         self.switch = False
         self.CaptureArea = CaptureArea(self)
@@ -482,7 +480,7 @@ class TankShell(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center = (self.x, self.y))
         self.mask = pygame.mask.from_surface(self.image)
 
-# FIXME: antena params....
+
 class Tank(pygame.sprite.Sprite):
     """Tank object.
     
@@ -516,6 +514,9 @@ class Tank(pygame.sprite.Sprite):
 
         destroyed_flag: bool
             True if destroyed.
+
+        manual_control_flag: bool
+            True for manual control (debug).
     """
 
     def __init__(self, pos0_x: float, pos0_y: float, phi0: float, 
@@ -560,6 +561,7 @@ class Tank(pygame.sprite.Sprite):
         self.v_in = 0
         self.phi_rel_in = 0
         self.shoot = 0
+        self.manual_control_flag = False
         # Pseudo position memory
         self.last_x = self.x
         self.last_y = self.y
@@ -581,11 +583,12 @@ class Tank(pygame.sprite.Sprite):
         self.captured_flag = False
         self.destroyed_flag = False
         # Tank antennas
-        self._ant_num = 18
+        self.ant_num = NUM_OF_ANTENNAS
         self.antennas = np.linspace(
-            0, 2*np.pi - (2*np.pi/self._ant_num), self._ant_num)
-        self.ant_distances = np.zeros(self._ant_num)
-        self.ant_points = np.zeros((self._ant_num, 2))
+            0, 2*np.pi - (2*np.pi/self.ant_num), self.ant_num)
+        self.antennas += np.pi/2
+        self.ant_distances = np.zeros(self.ant_num)
+        self.ant_points = np.zeros((self.ant_num, 2))
 
 
     def input_manual(self, key: pygame.key, key_event: int):
@@ -663,13 +666,15 @@ class Tank(pygame.sprite.Sprite):
     def measure_distances(self, arena: Arena):
         """Measure distances from sensors to LOS blocking environment 
         
-        arena -- arena handle
+        Parameters:
+            arena: Arena class object.
         """
+
         phi_rad = math.radians(self.phi)
-        for i in range(0,self._ant_num):
+        for i in range(0,self.ant_num):
             self.ant_distances[i],xt ,yt = tu.cast_line(
                 self.x, self.y, 
-                self.antennas[i] + phi_rad, arena.LOS_mask)
+                self.antennas[i] - phi_rad, arena.LOS_mask)
             self.ant_points[i] = np.array([xt, yt], ndmin=2)
 
     def update(self, dt, arena: Arena, mode: int = 0):
@@ -679,7 +684,7 @@ class Tank(pygame.sprite.Sprite):
             dt: Time step in seconds.
             mode: Optional, defaults to 0.
                 0: Basic update for next "frame".
-                1: For tankArenaCollision (iterative inverse method).
+                1: For tank_arena_collision (iterative inverse method).
         """
 
         # Save last position in case of collision
@@ -726,7 +731,7 @@ class Tank(pygame.sprite.Sprite):
             if self.phi > 360:
                 self.phi = self.phi - 360*(self.phi // 360)
             elif self.phi < 0:
-                self.phi = self.phi + 360*(1 - (self.phi // 360))
+                self.phi = self.phi - 360*(self.phi // 360)
             self.measure_distances(arena)
         self.move_assets()
 
@@ -832,11 +837,11 @@ class Tank(pygame.sprite.Sprite):
             game.WINDOW.blit(tshell.image, tshell.rect)
         game.WINDOW.blit(self.im_turret_rot, self.turret_rect)           
 
-        if game.render_antenas_flag:
+        if game.render_antennas_flag:
             if self.destroyed_flag:
                 return
             # Draw distance measuring lines
-            for i in range(0,self._ant_num):
+            for i in range(0,self.ant_num):
                 xt = self.ant_points[i,0]
                 yt = self.ant_points[i,1]
                 pygame.draw.line(game.WINDOW, (255, 0, 0), 
@@ -990,14 +995,15 @@ def main():
                         target_capture_time=5,
                         window_size=map_size)
         # Debug:
-        game.render_antenas_flag = True  
+        game.render_antennas_flag = True  
         game.manual_input_flag = True
+        game.team_1_list[0].manual_control_flag = True
 
         while game.round_run_flag:
             game.get_delta_time()
             game.check_and_handle_events()
             # -------------------------------------------------------
-            # INPUT
+            # INPUT game.inputAI()
             # -------------------------------------------------------
             game.update()
             game.draw()
