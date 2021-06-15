@@ -36,7 +36,7 @@ def string_pulling(path, environment):
 
 
 
-def has_LOS(x0, y0, xt, yt, environment):
+def has_LOS(x0, y0, xt, yt, environment, stride = 1):
     """Check if [x0, y0] has line of sight to [xt, yt]
     
     Check pixel by pixel whether environment block LOS between two coordinates
@@ -57,13 +57,13 @@ def has_LOS(x0, y0, xt, yt, environment):
     passed = True
     
     if abs(x0-xt) >= abs(y0-yt):
-        for x in range(x0, xt+1, np.sign(xt-x0)):
+        for x in range(x0, xt+1, stride*np.sign(xt-x0)):
             y = round(y0 + k*(x-x0))
             if environment[x,y] != 0:
                 passed = False
                 break
     else:
-        for y in range(y0, yt+1, np.sign(yt-y0)):
+        for y in range(y0, yt+1, stride*np.sign(yt-y0)):
             x = round(x0 + kinv*(y-y0))
             if environment[x,y] != 0:
                 passed = False
@@ -71,12 +71,15 @@ def has_LOS(x0, y0, xt, yt, environment):
     
     return passed
 
-def cast_line(x0, y0, phi, env):
+def cast_line(x0, y0, phi, env, stride = 15):
     """Project line from point at an angle until it reaches obstacle 
     
     x0, y0 -- starting point
     phi -- line angle
     env -- numpy array of environment
+    stride -- function checks only each nth pixel and then backsteps to find
+              intersection point. Higher value ~ better performance, but can
+              skip corners, or entire walls when set too great.
 
     returns euclidean distance to the obstacle and that point's coordinates 
     """
@@ -84,43 +87,44 @@ def cast_line(x0, y0, phi, env):
     if phi > 2*np.pi:
         phi = phi - 2*np.pi*(phi // (2*np.pi))
     elif phi < 0:
-        phi = phi + 2*np.pi*(1-(phi // (2*np.pi)))
+        phi = phi - 2*np.pi*(phi // (2*np.pi))
 
     x = round(x0)
     y = round(y0) 
 
     i = 0
     k = np.math.tan(phi)
-    
-    if abs(k) > 1:
-        while (env[round(x),round(y)] == 0):
-            if is_close(1/k, 0, 1e-3) is True:
-                if is_close(phi, np.pi/2, 1e-3) is True:
-                    y += 1
-                else:
-                    y -= 1
+
+    if abs(k) > 1: # Y axis is primary
+        while (env[x,y] == 0):
+            if (phi > 0) & (phi < np.pi):
+                y += stride
             else:
-                if (phi > np.pi/2) and (phi < np.pi*3/2):
-                    y -= 1
-                else:
-                    y += 1
+                y -= stride
             
             x = round(x0 + 1/k*(y-y0))
-            i += 1
-    else:
-        while (env[round(x),round(y)] == 0):
-            if is_close(k, 0, 1e-3) is True:
-                if is_close(phi, 0, 1e-3) is True:
-                    x += 1
-                else:
-                    x -= 1
+        # Backstepping
+        while (env[x, y] != 0):
+            if (phi > 0) & (phi < np.pi):
+                y -= 1
             else:
-                if (phi > 0) and (phi < np.pi):
-                    x += 1
-                else:
-                    x -= 1
+                y += 1
+            x = round(x0 + 1/k*(y-y0))
+
+    else: # X axis is primary
+        while (env[round(x),round(y)] == 0):
+            if (phi > np.pi*3/2) | (phi < np.pi/2):
+                x += stride
+            else:
+                x -= stride 
             y = round(y0 + k*(x-x0))
-            i += 1
+        # Backstepping
+        while (env[round(x),round(y)] != 0):
+            if (phi > np.pi*3/2) | (phi < np.pi/2):
+                x -= 1
+            else:
+                x += 1 
+            y = round(y0 + k*(x-x0))
 
     dist = np.sqrt((x-x0)**2 + (y-y0)**2)
     return dist, x, y
