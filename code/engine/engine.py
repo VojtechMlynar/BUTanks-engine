@@ -1,4 +1,4 @@
-"""BUTanks engine v0.1.2 - dev_DB branch RAI 2021
+"""BUTanks engine v0.1.2 HOTFIX - dev_DB branch RAI 2021
 
 Build on Python 3.9.1 and Pygame 2.0.1.
 Python 3.6+ required.
@@ -229,6 +229,9 @@ class Game:
             tank_scale: Scale of all tanks. Defaults to 1 (optional).
         """
 
+        self.team_1_list = []
+        self.team_2_list = []
+        self._win_team = None
         # Populate team lists
         for item in team_1_spawn_list:
             self.team_1_list.append(Tank(item[0], item[1], item[2], 0,
@@ -371,7 +374,7 @@ class Game:
         if self.quit_flag:
             pygame.quit()
             print("Final win list (0 = Tie): ", self.win_list)
-            print("Quitting.\n")
+            print("Quitting.")
             return
         self.last_millis = self._fps_clock.tick(self.target_FPS)
 
