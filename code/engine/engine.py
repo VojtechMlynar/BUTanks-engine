@@ -56,12 +56,12 @@ MAP_BACKGROUND_COLOR = (100, 100, 100)
 TARGET_CAPTURE_TIME = 5  # Time that must be spent in the capture area [s]
 
 # Tank settings
-FORWARD_SPEED = 150  # [px/s]
-BACKWARD_SPEED = 80  # [px/s]
-TURN_SPEED = 250  # [deg/s]
-TURRET_TURN_SPEED = 250  # [deg/s]
-TSHELL_SPEED = 350  # [px/s]
-GUN_COOLDOWN = 1  # [s]
+FORWARD_SPEED = 150      # [px/s]
+BACKWARD_SPEED = 80      # [px/s]
+TURN_SPEED = 150         # [deg/s]
+TURRET_TURN_SPEED = 150  # [deg/s]
+TSHELL_SPEED = 350       # [px/s]
+GUN_COOLDOWN = 1         # [s]
 MAX_HEALTH = 5
 NUM_OF_ANTENNAS = 10
 
@@ -383,7 +383,29 @@ class Arena(pygame.sprite.Sprite):
     """Arena sprite with CaptureArea attribute.
     
     Important attribute:
-        CaptureArea: CaptureArea object for capture area detection.  
+        CaptureArea: CaptureArea object for capture area detection.
+
+    Other attributes:
+        image -- map file image
+
+        res_scale -- tuple of how much was each axis scaled from original image
+            note: Use low resolution underlying images to save resources
+
+        alpha_arr -- numpy array of converted alpha values of the image file
+            notes:-- opaque pixels (255) are considered walls
+                  -- transparent pixels (0) are considered non blocking for
+                     movement and line of sight (LOS)
+                  -- pixels > 125, but < 255 are considered capture area,
+                     dont block movement and LOS
+
+        LOS_mask -- numpy array of window-scaled blocking terrain
+                 -- 255 is blocking terrain, everything equal or less than 254
+                    is set to 0
+
+        example: You have set size parameter to (1000,1000) when creating game
+            and have map image with resolution of (100,100). Hence, res_scale 
+            will be (10,10), alpha_arr will have dimensions (100,100) and 
+            LOS_mask (1000,1000)
     """
 
     def __init__(self, img_filename: str, size: tuple):
@@ -402,24 +424,10 @@ class Arena(pygame.sprite.Sprite):
         self.image = pygame.image.load(os.path.join(MAPS_DIR, img_filename))
         self.image.convert_alpha()
         w, h = self.image.get_size()
-        # Load image and create weights array
-        self.res_scale = size[0] / w
+        # Load image and create alpha array
+        self.res_scale = (size[0]/w, size[1]/h)
         self.alpha_arr = pygame.surfarray.array_alpha(self.image)
-        self.obstacles_bin = self.alpha_arr.copy()
-        self.obstacles_bin[np.where(self.obstacles_bin < 255)] = 0
-        self.obstacles_bin[np.where(self.obstacles_bin == 255)] = 1
-        self.obstacles_bin = self.obstacles_bin.astype(np.float32)
-        # Dilate image to get safety navigation margin
-        dil = math.ceil(NAV_MARGIN / self.res_scale)
-        self.obstacles_dil = tu.dilate_image(self.obstacles_bin, dil, "max")
-        self.dilated_scaled = tu.resize_image(self.obstacles_dil,
-                                              size[0], size[1])
-        # Extract capture area
-        self.capture_area_mask = self.alpha_arr.copy()
-        self.capture_area_mask[np.where(
-            (self.capture_area_mask > 250))] = 0
-        self.capture_area_mask[np.where(
-            (self.capture_area_mask > 10))] = 1
+
         # Main procedures
         self.image = pygame.transform.scale(self.image, (size[0], size[1]))
         self.rect = self.image.get_rect()

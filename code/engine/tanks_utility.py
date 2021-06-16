@@ -47,8 +47,13 @@ def has_LOS(x0, y0, xt, yt, environment, stride = 1):
 
     return True/False whether there is/is not LOS between points            
     """
+    if(environment[x0,y0] != 0):
+        return False
+        
     if (xt-x0) == 0:
         kinv = 0
+        if (yt-y0) == 0:
+            return True
     else:    
         k = (yt-y0)/(xt-x0)
         if k != 0:
