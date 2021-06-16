@@ -6,7 +6,35 @@ import pyastar2d
 import pygame
 import tanks_utility as tu
 
-def AI_get_weights(arena: engine.Arena, tank: engine.Tank, enemy: engine.Tank):
+class ArenaMasks():
+    """Class to hold various masks of arena image """
+    def __init__(self, arena: engine.Arena):
+        """Extract features from arena image """
+        NAV_MARGIN = 25 #[px] should be at least half width of tank sprite
+        
+        # Create binary mask of obstacels
+        self.obstacles_bin = arena.alpha_arr.copy()
+        self.obstacles_bin[np.where(self.obstacles_bin < 255)] = 0
+        self.obstacles_bin[np.where(self.obstacles_bin == 255)] = 1
+        self.obstacles_bin = self.obstacles_bin.astype(np.float32)
+        
+        # Dilate image to get safety navigation margin
+        size = arena.image.get_size()
+        dil = math.ceil(NAV_MARGIN / arena.res_scale[0])
+        self.obstacles_dil = tu.dilate_image(self.obstacles_bin, dil, "max")
+        self.dilated_scaled = tu.resize_image(self.obstacles_dil, 
+                                              size[0], size[1])
+        # Extract capture area
+        self.capture_area_mask = arena.alpha_arr.copy()
+        self.capture_area_mask[np.where(
+            (self.capture_area_mask > 250))] = 0
+        self.capture_area_mask[np.where(
+            (self.capture_area_mask > 10))] = 1
+
+        self.res_scale = arena.res_scale
+    
+
+def AI_get_weights(arena: ArenaMasks, tank: engine.Tank, enemy: engine.Tank):
     """Get influence map of game - lower value means more attractive
     
         arena -- game arena object handle
@@ -21,7 +49,7 @@ def AI_get_weights(arena: engine.Arena, tank: engine.Tank, enemy: engine.Tank):
     baseline = arena.obstacles_bin.copy() 
     dilated = arena.obstacles_dil#.copy() 
     capture_area = arena.capture_area_mask#.copy() # TODO
-    x_e, y_e = round(enemy.x/scale), round(enemy.y/scale)
+    x_e, y_e = round(enemy.x/scale[0]), round(enemy.y/scale[1])
     enemy_AOE = baseline.copy()
     enemy_AOE = floodfill(enemy_AOE, (x_e, y_e), (x_e, y_e), 25, ENEMY_WEIGHT,
                           max_depth = 50)
@@ -132,7 +160,7 @@ def floodfill(matrix, start, orig, radius, weight, max_depth = 50):
     return matrix
 
 
-def AI_plan_path(arena: engine.Arena, tank: engine.Tank,
+def AI_plan_path(arena: ArenaMasks, tank: engine.Tank,
                  weights, target, pullstring = True):
     """Plan path through array with A*
     
@@ -144,14 +172,14 @@ def AI_plan_path(arena: engine.Arena, tank: engine.Tank,
                     by string pulling method 
     
     """
-    X0 = round(tank.x/arena.res_scale)
-    Y0 = round(tank.y/arena.res_scale)
+    X0 = round(tank.x/arena.res_scale[0])
+    Y0 = round(tank.y/arena.res_scale[1])
 
     path = pyastar2d.astar_path(weights,
         (X0, Y0), (target[0], target[1]), allow_diagonal = False)
 
     if path is not None:
-        path_scaled = path*arena.res_scale + math.floor(arena.res_scale/2)
+        path_scaled = path*arena.res_scale[0] + math.floor(arena.res_scale[0]/2)
         if pullstring is True:
             path_optimal = tu.string_pulling(path_scaled, arena.dilated_scaled)
             return path_optimal
@@ -166,7 +194,6 @@ def AI_draw_path(game: engine.Game, path, colour):
         pygame.draw.line(game.WINDOW, colour, 
             (path[i,]), (path[i+1,]), 2)
     
-
 
 # MAIN LOOP
 
@@ -184,7 +211,8 @@ def main():
     # USER INIT
 
     tic = time.perf_counter()
-    path = None   
+    path = None 
+    masks = ArenaMasks(game.arena)  
 
     # ------------
     while not game.quit_flag:
@@ -228,13 +256,14 @@ def main():
             time_from_update = toc-tic
 
             if time_from_update > 1:
-                AI_red_matrix = AI_get_weights(game.arena, 
-                    game.team_2_list[0], game.team_1_list[0])
-                candidates = np.where(AI_red_matrix == np.amin(AI_red_matrix))
+                AI_red_matrix = AI_get_weights(masks, 
+                                               game.team_2_list[0],
+                                               game.team_1_list[0])
 
+                candidates = np.where(AI_red_matrix == np.amin(AI_red_matrix))
                 if candidates is not None:
                     target = (candidates[0][0], candidates[1][0])
-                    path = AI_plan_path(game.arena, game.team_2_list[0],
+                    path = AI_plan_path(masks, game.team_2_list[0],
                                     AI_red_matrix, target)
                     red_controller.set_waypoints(path[1:,:])
                 tic = time.perf_counter()
