@@ -59,8 +59,8 @@ TARGET_CAPTURE_TIME = 5   # Time that must be spent in the capture area [s]
 # Tank settings
 FORWARD_SPEED = 150      # [px/s]
 BACKWARD_SPEED = 80      # [px/s]
-TURN_SPEED = 250         # [deg/s]
-TURRET_TURN_SPEED = 250  # [deg/s]
+TURN_SPEED = 150         # [deg/s]
+TURRET_TURN_SPEED = 150  # [deg/s]
 TSHELL_SPEED = 350       # [px/s]
 GUN_COOLDOWN = 1         # [s]
 MAX_HEALTH = 5
