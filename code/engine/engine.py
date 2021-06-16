@@ -59,9 +59,9 @@ TARGET_CAPTURE_TIME = 5  # Time that must be spent in the capture area [s]
 FORWARD_SPEED = 150      # [px/s]
 BACKWARD_SPEED = 80      # [px/s]
 TURN_SPEED = 150         # [deg/s]
-TURRET_TURN_SPEED = 150  # [deg/s]
+TURRET_TURN_SPEED = 200  # [deg/s]
 TSHELL_SPEED = 350       # [px/s]
-GUN_COOLDOWN = 1         # [s]
+GUN_COOLDOWN = 0.5         # [s]
 MAX_HEALTH = 5
 NUM_OF_ANTENNAS = 10
 
@@ -721,7 +721,7 @@ class Tank(pygame.sprite.Sprite):
         for i in range(0, self.ant_num):
             self.ant_distances[i], xt, yt = tu.cast_line(
                 self.x, self.y,
-                self.antennas[i] - phi_rad, arena.LOS_mask)
+                self.antennas[i] - phi_rad, arena.LOS_mask, stride = 10)
             self.ant_points[i] = np.array([xt, yt], ndmin=2)
 
     def update(self, dt, arena: Arena, mode: int = 0):
