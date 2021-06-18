@@ -1,4 +1,4 @@
-"""BUTanks engine v0.1.2 HOTFIX - dev_DB branch RAI 2021
+"""BUTanks engine v0.1.3 - RAI 2021
 
 Build on Python 3.9.1 and Pygame 2.0.1.
 Python 3.6+ required.
@@ -9,7 +9,7 @@ Info:
 
 - Run this script for check of all parameters (manual controls enabled).
 
-Manual control keybindings:
+Manual control (if turn on) keybindings:
 - Turn body left ---- 'left arrow' key
 - Turn body right --- 'right arrow' key
 - Move forward ------ 'up arrow' key 
@@ -27,15 +27,16 @@ import pygame
 from pathlib import Path
 import tanks_utility as tu
 
+# Game object DEFAULT CONFIG:---------------------------------------------------
 # Game rendering
 TARGET_FPS = 60  # Set very high for non graphic learning (e.g. 10000)
 RENDER_ALL_FRAMES = True  # Set False to render only target frames or None
 TARGET_FRAME = 100  # Target frames to render (multiplies of this num)
 FIXED_DT = None  # None for graphic mode
-
-# Convenient EXAMPLES:----------------------------------------------------------
+MAP_BACKGROUND_COLOR = (100, 100, 100)
+# Convenient EXAMPLES:-----------------
 # Real time mode:
-# TARGET_FPS = 60  
+# TARGET_FPS = 60
 # RENDER_ALL_FRAMES = True
 # FIXED_DT = None
 #
@@ -49,12 +50,7 @@ FIXED_DT = None  # None for graphic mode
 # RENDER_ALL_FRAMES = False
 # TARGET_FRAME = 100
 # FIXED_DT = 1/25
-# ------------------------------------------------------------------------------
-
-# Game settings
-MAP_BACKGROUND_COLOR = (100, 100, 100)
-TARGET_CAPTURE_TIME = 5  # Time that must be spent in the capture area [s]
-
+# -------------------------------------
 # Tank settings
 FORWARD_SPEED = 150      # [px/s]
 BACKWARD_SPEED = 80      # [px/s]
@@ -63,24 +59,108 @@ TURRET_TURN_SPEED = 150  # [deg/s]
 TSHELL_SPEED = 350       # [px/s]
 GUN_COOLDOWN = 1         # [s]
 MAX_HEALTH = 5
-NUM_OF_ANTENNAS = 10
-
+NUM_OF_ANTENNAS = 8
 # Collision handling
 MAX_WALL_COLLISION_ITER = 20
-
-# Map dilation
-NAV_MARGIN = 25
-
 # PATHS to files
 p = Path(__file__).parents[1]
 ASSETS_DIR = os.path.join(p, "assets")
 MAPS_DIR = os.path.join(ASSETS_DIR, "maps")
 IMGS_DIR = os.path.join(ASSETS_DIR, "images")
+# End of DEFAULT CONFIG:--------------------------------------------------------
 
-# Only for running this exact py:
+# Only for running this exact .py:
 WIDTH, HEIGHT = 1000, 1000
 MAP_FILENAME = "map1.png"
 NUM_OF_ROUNDS = 4
+TARGET_CAPTURE_TIME = 5  # Time that must be spent in the capture area [s]
+TANK_SCALE = 1
+
+
+class GameConfig:
+    """Config for Game class (externally configurable).
+
+    Attributes:
+        Rendering attributes:---------------------------------------------------
+        TARGET_FPS: int
+            Target Frames Per Seconds (FPS cap).
+            Set very high for not restrict FPS in non render mode (e.g. 10000).
+
+        RENDER_ALL_FRAMES: bool or None
+            True for rendering all frames.
+            False for rendering only target frames.
+            None to turn off rendering completely.
+
+        TARGET_FRAME: int
+            Only frames that are multiplies of this int will be rendered if
+            RENDER_ALL_FRAMES == False.
+
+        FIXED_DT: float or None
+            If None, time step is calculated from tics, otherwise set to
+            provided value.
+
+        MAP_BACKGROUND_COLOR: tuple
+            Background color in RGB colorspace, each value 0-255.
+
+        Tank config attributes:-------------------------------------------------
+        FORWARD_SPEED: float
+            Forward speed of tank in pixels per second.
+
+        BACKWARD_SPEED: float
+            Backward speed of tank in pixels per second.
+
+        TURN_SPEED: float
+            Tank body turn speed in degrees per second.
+
+        TURRET_TURN_SPEED: float
+            Tank turret turn speed in degrees per second.
+
+        TSHELL_SPEED: float
+            Speed of fired tank shell in pixels per second.
+
+        GUN_COOLDOWN: float
+            Minimal time between two fired tank shells in seconds.
+
+        MAX_HEALTH: int
+            Starting number of lives of each tank.
+
+        NUM_OF_ANTENNAS: int
+            Number of antennas of one tank.
+            First antenna aims forward more added in direction of clock hands.
+
+        Additional attributes:--------------------------------------------------
+        MAX_WALL_COLLISION_ITER: int
+            Max number of iterations for wall collision handling.
+
+        MAPS_DIR: str
+            Path to maps dir.
+
+        IMGS_DIR: str
+            Path to assets dir.
+    """
+
+    def __init__(self):
+
+        # Game rendering
+        self.TARGET_FPS = TARGET_FPS
+        self.RENDER_ALL_FRAMES = RENDER_ALL_FRAMES
+        self.TARGET_FRAME = TARGET_FRAME
+        self.FIXED_DT = FIXED_DT
+        self.MAP_BACKGROUND_COLOR = MAP_BACKGROUND_COLOR
+        # Tank settings
+        self.FORWARD_SPEED = FORWARD_SPEED
+        self.BACKWARD_SPEED = BACKWARD_SPEED
+        self.TURN_SPEED = TURN_SPEED
+        self.TURRET_TURN_SPEED = TURRET_TURN_SPEED
+        self.TSHELL_SPEED = TSHELL_SPEED
+        self.GUN_COOLDOWN = GUN_COOLDOWN
+        self.MAX_HEALTH = MAX_HEALTH
+        self.NUM_OF_ANTENNAS = NUM_OF_ANTENNAS
+        # Collision handling
+        self.MAX_WALL_COLLISION_ITER = MAX_WALL_COLLISION_ITER
+        # PATHS to files
+        self.MAPS_DIR = MAPS_DIR
+        self.IMGS_DIR = IMGS_DIR
 
 
 class Game:
@@ -148,7 +228,7 @@ class Game:
 
             dt_fixed: None or float
                 If not None, sets fixed time step in seconds.
-                Usefull for non graphic learning.
+                Useful for non graphic learning.
 
             target_capture_time: int
                 Target capture time in seconds.
@@ -171,14 +251,16 @@ class Game:
     """
 
     def __init__(self, map_filename: str, window_size: tuple,
-                 num_of_rounds: int = 1):
+                 num_of_rounds: int = 1, game_config=GameConfig()):
         """
         Parameters:
             num_of_rounds: Number of game rounds. Defaults to 1.
             map_filename: Arena image filename.
             window_size: Size of window as (width,height) in pixels.
+            game_config: Optional GameConfig class object.
         """
 
+        self.config = game_config
         # Declaration of all attributes (most of them changed in init_round)
         self.num_of_rounds = num_of_rounds
         self.team_1_list = []
@@ -196,10 +278,10 @@ class Game:
         self.team_2_captured_flag = False
         self.team_1_destroyed_flag = False
         self.team_2_destroyed_flag = False
-        self.target_FPS = TARGET_FPS
-        self.render_all_frames = RENDER_ALL_FRAMES
-        self.target_frame = TARGET_FRAME
-        self.dt_fixed = FIXED_DT
+        self.target_FPS = self.config.TARGET_FPS
+        self.render_all_frames = self.config.RENDER_ALL_FRAMES
+        self.target_frame = self.config.TARGET_FRAME
+        self.dt_fixed = self.config.FIXED_DT
         self.target_capture_time = None
         self.last_millis = 0
         # Window init
@@ -212,9 +294,8 @@ class Game:
         # Other attributes
         self._fps_clock = None
         self._i_frame = 0
-        self._win_team = None
         self._i_round = 1
-        self._win_team = None
+        self.win_team = None
         pygame.display.set_caption("BUTanks engine")
         print("BUTanks engine initializing... Have fun!\n")
 
@@ -231,16 +312,16 @@ class Game:
 
         self.team_1_list = []
         self.team_2_list = []
-        self._win_team = None
+        self.win_team = None
         # Populate team lists
         for item in team_1_spawn_list:
             self.team_1_list.append(Tank(item[0], item[1], item[2], 0,
                                          "tank_1.png", "turret_1.png",
-                                         "tank_shell_1.png", tank_scale))
+                                         "tank_shell_1.png", self, tank_scale))
         for item in team_2_spawn_list:
             self.team_2_list.append(Tank(item[0], item[1], item[2], 0,
                                          "tank_2.png", "turret_2.png",
-                                         "tank_shell_2.png", tank_scale))
+                                         "tank_shell_2.png", self, tank_scale))
         self.master_list = self.team_1_list + self.team_2_list
         self.team_1_alive = len(team_1_spawn_list)
         self.team_2_alive = len(team_2_spawn_list)
@@ -305,7 +386,7 @@ class Game:
         """Draws background (arena) into buffered frame."""
 
         if (self._i_frame == self.target_frame) or self.render_all_frames:
-            self.WINDOW.fill(MAP_BACKGROUND_COLOR)
+            self.WINDOW.fill(self.config.MAP_BACKGROUND_COLOR)
             pygame.sprite.RenderPlain(self.arena).draw(self.WINDOW)
 
     def draw_tanks(self):
@@ -344,26 +425,26 @@ class Game:
             print("- Team 2 destroyed!")
         # Check winner based on successfully captured area
         if self.team_1_captured_flag and self.team_2_captured_flag:
-            self._win_team = 0  # Tie
+            self.win_team = 0  # Tie
         elif self.team_1_captured_flag:
-            self._win_team = 1
+            self.win_team = 1
         elif self.team_2_captured_flag:
-            self._win_team = 2
+            self.win_team = 2
         # Check winner based on destroying whole opposite team
         if self.team_1_destroyed_flag and self.team_2_destroyed_flag:
-            self._win_team = 0  # Tie
+            self.win_team = 0  # Tie
         elif self.team_1_destroyed_flag:
-            self._win_team = 2
+            self.win_team = 2
         elif self.team_2_destroyed_flag:
-            self._win_team = 1
+            self.win_team = 1
         # Check if any team just won
-        if self._win_team is not None:
-            self.win_list.append(self._win_team)
+        if self.win_team is not None:
+            self.win_list.append(self.win_team)
             # Write appropriate string to terminal
-            if self._win_team == 0:
+            if self.win_team == 0:
                 win_str = "Round ended in a tie!\n"
             else:
-                win_str = f'Team {self._win_team} won!\n'
+                win_str = f'Team {self.win_team} won!\n'
             print(win_str)
             # Raise flags
             self.round_run_flag = False
@@ -382,27 +463,31 @@ class Game:
 class Arena(pygame.sprite.Sprite):
     """Arena sprite with CaptureArea attribute.
     
-    Important attribute:
-        CaptureArea: CaptureArea object for capture area detection.
+    Attributes:
+        CaptureArea: CaptureArea
+            CaptureArea object for capture area detection.
 
-    Other attributes:
-        image -- map file image
+        image: pygame.Surface
+            Map file image.
 
-        res_scale -- tuple of how much was each axis scaled from original image
-            note: Use low resolution underlying images to save resources
+        res_scale: tuple
+            Tuple of how much was each axis scaled from original image.
+            Note: Use low resolution underlying images to save resources.
 
-        alpha_arr -- numpy array of converted alpha values of the image file
-            notes:-- opaque pixels (255) are considered walls
-                  -- transparent pixels (0) are considered non blocking for
-                     movement and line of sight (LOS)
-                  -- pixels > 125, but < 255 are considered capture area,
-                     dont block movement and LOS
+        alpha_arr: np.ndarray
+            Numpy array of converted alpha values of the image file
+            Notes: - Opaque pixels (255) are considered walls.
+                   - Transparent pixels (0) are considered non blocking for
+                     movement and line of sight (LOS).
+                   - Pixels > 125, but < 255 are considered capture area,
+                     dont block movement and LOS.
 
-        LOS_mask -- numpy array of window-scaled blocking terrain
+        LOS_mask: np.ndarray
+            Numpy array of window-scaled blocking terrain
                  -- 255 is blocking terrain, everything equal or less than 254
-                    is set to 0
+                    is set to 0.
 
-        example: You have set size parameter to (1000,1000) when creating game
+        Example: You have set size parameter to (1000,1000) when creating game
             and have map image with resolution of (100,100). Hence, res_scale 
             will be (10,10), alpha_arr will have dimensions (100,100) and 
             LOS_mask (1000,1000)
@@ -544,11 +629,24 @@ class Tank(pygame.sprite.Sprite):
 
         manual_control_flag: bool
             True for manual control (debug).
+
+        ant_num: int
+            Number of antennas.
+            First aiming forward next in direction of clock hands.
+
+        antennas: np.ndarray
+            Angle between two antennas (0&1, 1&2, ...), the last is extra...
+
+        ant_distances: np.ndarray
+            Distance from center in pixels from tank to walls using antennas.
+
+        ant_points: np.ndarray
+            x, y coordinates of detected wall using antennas.
     """
 
     def __init__(self, pos0_x: float, pos0_y: float, phi0: float,
                  phi_rel0: float, img_body: str, img_turret: str,
-                 img_tshell: str, scale: float = 1):
+                 img_tshell: str, game: Game, scale: float = 1):
         """
         Parameters:
             pos0_x: Initial center coordinate on x axis in pixels.
@@ -559,6 +657,8 @@ class Tank(pygame.sprite.Sprite):
             img_body: Tank body asset filename.
             img_turret: Tank turret asset filename.
             img_tshell: Tank shell asset filename.
+            game: Game class object for inheriting config.
+            scale: Size scale of tank.
         """
 
         super(Tank, self).__init__()
@@ -591,16 +691,16 @@ class Tank(pygame.sprite.Sprite):
         self.phi = phi0
         self.phi_rel = phi_rel0
         # Properties
-        self.FORWARD_SPEED = FORWARD_SPEED
-        self.BACKWARD_SPEED = BACKWARD_SPEED
-        self.TURN_SPEED = TURN_SPEED
-        self.TURRET_TURN_SPEED = TURRET_TURN_SPEED
-        self.TSHELL_SPEED = TSHELL_SPEED
-        self.GUN_COOLDOWN = GUN_COOLDOWN
+        self.FORWARD_SPEED = game.config.FORWARD_SPEED
+        self.BACKWARD_SPEED = game.config.BACKWARD_SPEED
+        self.TURN_SPEED = game.config.TURN_SPEED
+        self.TURRET_TURN_SPEED = game.config.TURRET_TURN_SPEED
+        self.TSHELL_SPEED = game.config.TSHELL_SPEED
+        self.GUN_COOLDOWN = game.config.GUN_COOLDOWN
         if self.scale != 1:
-            self.FORWARD_SPEED = FORWARD_SPEED * self.scale
-            self.BACKWARD_SPEED = BACKWARD_SPEED * self.scale
-            self.TSHELL_SPEED = TSHELL_SPEED * self.scale
+            self.FORWARD_SPEED = game.config.FORWARD_SPEED * self.scale
+            self.BACKWARD_SPEED = game.config.BACKWARD_SPEED * self.scale
+            self.TSHELL_SPEED = game.config.TSHELL_SPEED * self.scale
         # Controls
         self.phi_in = 0
         self.v_in = 0
@@ -622,18 +722,23 @@ class Tank(pygame.sprite.Sprite):
         self.tshell_list = []
         self.shoot_delay = self.GUN_COOLDOWN
         # Tank stats
-        self.health = MAX_HEALTH
+        self.health = game.config.MAX_HEALTH
         self.captured_time = 0
         self.capturing_flag = False
         self.captured_flag = False
         self.destroyed_flag = False
         # Tank antennas
-        self.ant_num = NUM_OF_ANTENNAS
-        self.antennas = np.linspace(
-            0, 2 * np.pi - (2 * np.pi / self.ant_num), self.ant_num)
-        self.antennas += np.pi / 2
-        self.ant_distances = np.zeros(self.ant_num)
-        self.ant_points = np.zeros((self.ant_num, 2))
+        self.ant_num = game.config.NUM_OF_ANTENNAS
+        if self.ant_num:
+            self.antennas = np.linspace(
+                0, 2 * np.pi - (2 * np.pi / self.ant_num), self.ant_num)
+            self.antennas += np.pi / 2
+            self.ant_distances = np.zeros(self.ant_num)
+            self.ant_points = np.zeros((self.ant_num, 2))
+        else:
+            self.antennas = 0
+            self.ant_distances = 0
+            self.ant_points = 0
 
     def input_manual(self, key: pygame.key, key_event: int):
         """Handles manual inputs (primarily for checking game parameters).
@@ -713,16 +818,17 @@ class Tank(pygame.sprite.Sprite):
         Parameters:
             arena: Arena class object.
         """
-        if self.phi > 360:
-            self.phi = self.phi - 360 * (self.phi // 360)
-        elif self.phi < 0:
-            self.phi = self.phi - 360 * (self.phi // 360)
-        phi_rad = math.radians(self.phi)
-        for i in range(0, self.ant_num):
-            self.ant_distances[i], xt, yt = tu.cast_line(
-                self.x, self.y,
-                self.antennas[i] - phi_rad, arena.LOS_mask)
-            self.ant_points[i] = np.array([xt, yt], ndmin=2)
+        if self.ant_num:
+            if self.phi > 360:
+                self.phi = self.phi - 360 * (self.phi // 360)
+            elif self.phi < 0:
+                self.phi = self.phi - 360 * (self.phi // 360)
+            phi_rad = math.radians(self.phi)
+            for i in range(0, self.ant_num):
+                self.ant_distances[i], xt, yt = tu.cast_line(
+                    self.x, self.y,
+                    self.antennas[i] - phi_rad, arena.LOS_mask)
+                self.ant_points[i] = np.array([xt, yt], ndmin=2)
 
     def update(self, dt, arena: Arena, mode: int = 0):
         """Update tank related assets based on input and time step.
@@ -745,6 +851,10 @@ class Tank(pygame.sprite.Sprite):
                 # Shoot new tank shell
                 if self.shoot_delay >= self.GUN_COOLDOWN:
                     s_phi = self.phi + self.phi_rel
+                    if s_phi > 360:
+                        s_phi = s_phi - 360 * (s_phi // 360)
+                    elif s_phi < 0:
+                        s_phi = s_phi - 360 * (s_phi // 360)
                     s_x0 = self.x + self.canon_len * math.sin(math.radians(s_phi))
                     s_y0 = self.y + self.canon_len * math.cos(math.radians(s_phi))
                     self.tshell_list.append(TankShell(self.im_tshell, s_x0,
@@ -773,8 +883,16 @@ class Tank(pygame.sprite.Sprite):
         self.x += speed * self.v_in * math.sin(math.radians(self.phi)) * dt
         self.y += speed * self.v_in * math.cos(math.radians(self.phi)) * dt
         self.phi += turn_speed * self.phi_in * dt
+        if self.phi > 360:
+            self.phi = self.phi - 360 * (self.phi // 360)
+        elif self.phi < 0:
+            self.phi = self.phi - 360 * (self.phi // 360)
         if mode == 0:
             self.phi_rel += self.TURRET_TURN_SPEED * self.phi_rel_in * dt
+            if self.phi_rel > 360:
+                self.phi_rel = self.phi_rel - 360 * (self.phi_rel // 360)
+            elif self.phi_rel < 0:
+                self.phi_rel = self.phi_rel - 360 * (self.phi_rel // 360)
         self.move_assets()
 
     def revert_to_last(self):
@@ -785,15 +903,16 @@ class Tank(pygame.sprite.Sprite):
         self.phi = self.last_phi
         self.move_assets()
 
-    def wall_collision(self, arena: Arena, dt: float):
+    def wall_collision(self, arena: Arena, dt: float, max_iter: int):
         """Advanced handling of collision with walls.
 
         Parameters:
             arena: Arena class object which is also a Sprite.
             dt: Time step in seconds.
+            max_iter: Max number of iterations.
         """
 
-        dt_step = dt / MAX_WALL_COLLISION_ITER
+        dt_step = dt / max_iter
         translate_step = 0.5
         # Check for simultaneous inputs -> more complex solution required
         if (self.v_in != 0) and (self.phi_in != 0):
@@ -811,7 +930,7 @@ class Tank(pygame.sprite.Sprite):
 
         fix = 0
         # Iterate to non colliding position using inverse steps
-        for i in range(MAX_WALL_COLLISION_ITER):
+        for i in range(max_iter):
             self.update(dt_step, arena, 1)
             col = pygame.sprite.collide_mask(self, arena)
             if col is None:
@@ -830,7 +949,7 @@ class Tank(pygame.sprite.Sprite):
             self.y = y
             self.phi = phi
             # Iterate to non colliding position using alternative approach
-            for i in range(MAX_WALL_COLLISION_ITER):
+            for i in range(max_iter):
                 self.x += translate_step * math.sin(math.radians(
                           (self.phi_in * (-90)) + self.phi))
                 self.y += translate_step * math.cos(math.radians(
@@ -839,9 +958,9 @@ class Tank(pygame.sprite.Sprite):
                 col = pygame.sprite.collide_mask(self, arena)
                 if col is None:
                     break
-            fixt_dist2 = math.sqrt((abs(x - self.x)) ** 2 + (abs(y - self.y)) ** 2)
+            fix_dist2 = math.sqrt((abs(x - self.x)) ** 2 + (abs(y - self.y)) ** 2)
             # Compare solutions based on distance
-            if (fix == 1) and (fix_dist < fixt_dist2):
+            if (fix == 1) and (fix_dist < fix_dist2):
                 self.x = x_fix
                 self.y = y_fix
                 self.phi = phi_fix
@@ -896,13 +1015,14 @@ def handle_collisions(arena: Arena, game: Game):
         game: Game class object.
     """
 
-    def tank_arena_collision(arena: Arena, tank: Tank, dt: float):
+    def tank_arena_collision(arena: Arena, tank: Tank, dt: float, max_iter: int):
         """Handles collision between Tank and Arena.
 
         Parameters:
             arena: Arena class object.
             tank: Tank class object.
-            dt: Time step in seconds.  
+            dt: Time step in seconds.
+            max_iter: Max number of iterations.
         """
 
         if tank.destroyed_flag:
@@ -910,19 +1030,18 @@ def handle_collisions(arena: Arena, game: Game):
         # Check for collision
         col = pygame.sprite.collide_mask(tank, arena)
         if col is not None:
-            tank.wall_collision(arena, dt)
+            tank.wall_collision(arena, dt, max_iter)
             # Prevent wall penetration in tank to tank collision handling
             tank.last_x = tank.x
             tank.last_y = tank.y
             tank.last_phi = tank.phi
 
-    def tank_tank_collision(tank1: Tank, tank2: Tank, arena: Arena):
+    def tank_tank_collision(tank1: Tank, tank2: Tank):
         """Handles collision between two Tanks.
 
         Parameters:
             tank1: Tank class object.
             tank2: Tank class object.
-            arena: Arena class object.
         """
 
         if tank1.destroyed_flag or tank2.destroyed_flag:
@@ -1002,15 +1121,19 @@ def handle_collisions(arena: Arena, game: Game):
                     game.team_2_captured_time += game.dt
             else:
                 tank.capturing_flag = True
+                print(f'-- Team {team_num} is capturing area.')
         else:
-            tank.capturing_flag = False
+            if tank.capturing_flag:
+                tank.capturing_flag = False
+                print(f'-- Team {team_num} stopped capturing area.')
 
     # Main handleCollisions() sequence:
     combinations_list = itertools.combinations(game.master_list, 2)
     for tank in game.master_list:
-        tank_arena_collision(game.arena, tank, game.dt)
+        tank_arena_collision(game.arena, tank, game.dt,
+                             game.config.MAX_WALL_COLLISION_ITER)
     for comb in combinations_list:
-        tank_tank_collision(comb[0], comb[1], game.arena)
+        tank_tank_collision(comb[0], comb[1])
     for tank in game.team_1_list:
         tshell_collisions(arena, game, tank, 2)
     for tank in game.team_2_list:
@@ -1026,37 +1149,47 @@ def handle_collisions(arena: Arena, game: Game):
 
 # MAIN LOOP
 def main():
-    game = Game(MAP_FILENAME, (WIDTH, HEIGHT), NUM_OF_ROUNDS)
+    # Example for customizing config (optional)
+    config = GameConfig()
+    config.MAP_BACKGROUND_COLOR = (100, 100, 100)
 
-    # init()
-    t1 = [(100, 100, 0)]
-    t2 = [(WIDTH - 100, HEIGHT - 100, 180)]
+    # Create Game class instance
+    game = Game(MAP_FILENAME, (WIDTH, HEIGHT), NUM_OF_ROUNDS,
+                game_config=config)
+    # Create spawn lists
+    team1_sl = [(100, 100, 0)]
+    team2_sl = [(WIDTH - 100, HEIGHT - 100, 180)]
 
+    # Main Game loop
     while not game.quit_flag:
-        game.init_round(team_1_spawn_list=t1,
-                        team_2_spawn_list=t2,
-                        target_capture_time=5,
-                        tank_scale=1)
-        # Debug:
+        game.init_round(team_1_spawn_list=team1_sl,
+                        team_2_spawn_list=team2_sl,
+                        target_capture_time=TARGET_CAPTURE_TIME,
+                        tank_scale=TANK_SCALE)
+
+        # Example to set manual controls (optional)
         game.render_antennas_flag = True
         game.manual_input_flag = True
-        game.team_1_list[0].manual_control_flag = True
+        game.team_2_list[0].manual_control_flag = True
 
+        # Main round loop
         while game.round_run_flag:
             game.get_delta_time()
             game.check_and_handle_events()
             # -------------------------------------------------------
-            # INPUT game.inputAI()
+            # INPUT: (game.inputAI())
             # -------------------------------------------------------
             game.update()
             game.draw_background()
-            # Place to draw under tanks
+            # Draw under tanks here
+
             game.draw_tanks()
-            # Place to draw on top of tanks
+            # Draw on top of tanks here
+
             game.update_frame()
             game.check_state()
             # -------------------------------------------------------
-            #  OUTPUT
+            #  OUTPUT: (observations)
             # -------------------------------------------------------
             # print("FPS: ", (1/(game.last_millis/1000)))
 
