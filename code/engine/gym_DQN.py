@@ -32,9 +32,9 @@ from tensorflow.keras.optimizers import Adam
 
 config = engine.GameConfig()
 config.NUM_OF_ANTENNAS = 8  # If not 8, manual edits in BUTanksGym needed
-# CONFIG FOR TRAINING (if testing, comment out next few lines)
+# # CONFIG FOR TRAINING (if testing, comment out next few lines):
 config.TARGET_FPS = 10000
-config.RENDER_ALL_FRAMES = False  # False (To speed up)
+config.RENDER_ALL_FRAMES = None  # False (To speed up)
 config.TARGET_FRAME = 150  # Draw only every 150th frame
 config.FIXED_DT = 1/25
 
@@ -45,14 +45,14 @@ TARGET_CAPTURE_TIME = 3  # [s]
 TANK_SCALE = 1
 
 # DQN parameters
-LEARNING_RATE = 0.001
-NUM_OF_ROUNDS = 100  # == EPISODES
+LEARNING_RATE = 0.05
+NUM_OF_ROUNDS = 200  # == EPISODES
 DISCOUNT = 0.95  # Also know as gamma
 EPSILON = 1.0  # Exploration rate
 EPSILON_MIN = 0.01
-EPSILON_DECAY = 0.95  # (*= EPSILON_DECAY)
+EPSILON_DECAY = 1e-4
 BATCH_SIZE = 32
-TRAIN_START = 15
+TRAIN_START = 40
 
 # Spawn lists
 t1 = [(100, 100, 0)]
@@ -231,7 +231,7 @@ class BUTanksGym(gym.Env):
             calc_distance = math.sqrt((ai_tank.x - capture_area_center[0]) ** 2 +
                                       (ai_tank.y - capture_area_center[1]) ** 2)
             reward = (init_distance - calc_distance)/2
-            print(f'reward: {reward}')
+            # print(f'reward: {reward}')
 
         # Check done eval
         if not self.game.round_run_flag:
@@ -295,7 +295,9 @@ class DQNAgent:
         self.memory.append((state, action, reward, next_state, done))
         if len(self.memory) > self.train_start:
             if self.epsilon > self.epsilon_min:
-                self.epsilon *= self.epsilon_decay
+                self.epsilon = self.epsilon - self.epsilon_decay * self.epsilon
+            else:
+                self.epsilon = self.epsilon_min
 
     def act(self, state):
         """Choose exploration/exploitation and return action."""
@@ -381,9 +383,11 @@ class DQNAgent:
                     state = next_state
                     i += 1
                     if done:
-                        str1 = f'Episode {e}/{self.EPISODES}, reward: {reward}'
+                        str1 = f'Episode {e+1}/{self.EPISODES}, reward: {reward}'
                         str2 = f', epsilon {self.epsilon}'
                         print(str1 + str2)
+                    if (i%25) == 0:
+                        print(f'Reward: {reward}')
                 self.train_dqn()
         finally:
             pygame.quit()
@@ -407,10 +411,6 @@ class DQNAgent:
                 if not (done or self.env.game.quit_flag):
                     self.env.render()
                 i += 1
-                if done:
-                    str1 = f'Episode {e}/{self.EPISODES}, reward: {reward}'
-                    str2 = f', epsilon {self.epsilon}'
-                    print(str1 + str2)
 
 
 def main():
