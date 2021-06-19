@@ -1,8 +1,20 @@
-"""BUTanks engine sample main script RAI 2021"""
+"""BUTanks engine with applied actor-critic reinforcement learning (RAI 2021)
+
+This script trains two agents against themselves. Semi-graphic mode is highly
+recommended, as it takes ~100 rounds to get at least semi-intelligent agents.
+You can use manual control to try and compete against trained bot. You can
+even try and change the map to evaluate agents generalization (spoiler alert
+- not so great)
+
+requires: pygame, tensorflow, tensorflow_probability, pyastar2d (might 
+require to install manually - just copy Github repo and follow instructions)
+
+Author: Vojtech Mlynar
+Date: 18.06.2021
+"""
 
 import os
 from pathlib import Path
-from tensorflow.python.ops.gen_math_ops import sigmoid_eager_fallback
 import engine
 import tanks_utility as tu
 import numpy as np
@@ -215,6 +227,7 @@ class ActorCriticAgent:
         self.mem_reward.clear()
 
     def act(self, state):
+        """Get net output """
         state_complete = self.static_state
         state_complete[:,:,2] = state
         state_complete = tf.convert_to_tensor(state_complete)
@@ -224,43 +237,59 @@ class ActorCriticAgent:
         return mu, sigma, critic_value  # returns action
 
     def get_action_value(self,state):
+        """Get action value from net output
+        
+        state -- image shaped (w,h,1) numpy array with tank positions
+        """
+        # Get mu and sigma predictions
         mu, sigma, critic_value = self.act(state)
+        # Create normal distribution with predicted parameters
         n=tfp.distributions.Normal(loc=mu,scale=sigma)
-        action = n.sample()
-        prob = n.prob(action)
-        prob = tf.minimum(tf.constant([1.0, 1.0]),prob)
-        log_prob = tf.math.log(prob)
+        action = n.sample() #get sample from distribution
+        prob = n.prob(action) #get probability of selected action
 
-        xy = np.squeeze(np.round(np.clip(action*100,0,100)))
+        # Saturate probability to 1 - larger "probabilites" cause net to drift
+        # away from already found solutions to nonsensical ones
+        prob = tf.minimum(tf.constant([1.0, 1.0]),prob)
+        
+        # Make logarithmic probability
+        log_prob = tf.math.log(prob)
+        
+        # Convert 0..1 action to 0-99 discrete values - coordinates/"click"
+        xy = np.squeeze(np.round(np.clip(action*100,0,99)))
         return xy.astype(int), log_prob, critic_value
 
-    def load_weights(self, name):
-        self.model.load_weights(name)
-
-    def save_weights(self, name):
-        self.model.save_weights(name)
-
     def save_model(self, filepath):
+        """Save trained net to "filepath" folder"""
         self.model.save(filepath)
 
     def load_model(self, filepath):
-        model = keras.models.load_model(filepath)
-        #self.model.load_model(filepath)
+        """Load trained net to "filepath" folder"""
+        self.model = keras.models.load_model(filepath)
+
+    def load_weights(self, name):
+        """Load net weights"""
+        self.model.load_weights(name)
+
+    def save_weights(self, name):
+        """Save net weights only"""
+        self.model.save_weights(name)
 
 # ------------------------
 # MAIN LOOP
 # ------------------------
 
-
-
 eps = np.finfo(np.float32).eps.item()  # Smallest number such that 1.0 + eps != 1.0
 gamma = 0.99
 
 WIDTH, HEIGHT = 1000, 1000
-MAP_FILENAME = "map2.png"
+MAP_FILENAME = "map2.png" # ../assets/maps (preset path)
+TARGET_CAPTURE_TIME = 5  # [s]
 NUM_OF_ROUNDS = 5000
+TANK_SCALE = 1
 T_UPDATE = 0.5
 BATCH = 5
+# You can use these pretrained nets (trained on map2.png):
 NET_FILENAME1 = "Clicker_blue2"
 NET_FILENAME2 = "Clicker_red2"
 
@@ -269,32 +298,32 @@ NET1_DIR = os.path.join(p, "assets", "trained_nets", NET_FILENAME1)
 NET2_DIR = os.path.join(p, "assets", "trained_nets", NET_FILENAME2)
 
 def main():
-    # Init
-    game = engine.Game(MAP_FILENAME, (WIDTH, HEIGHT), NUM_OF_ROUNDS)
-    t1yrng = [850, 860]
+    # Config
+    config = engine.GameConfig()
+    config.MAP_BACKGROUND_COLOR = (100, 100, 100)
+    # Create engine.Game class instance
+    game = engine.Game(MAP_FILENAME, (WIDTH, HEIGHT), NUM_OF_ROUNDS,
+                       game_config=config)
+    
     t1 = [(100,500,90)]
     t2 = [(WIDTH-100, HEIGHT-500, 270)]
+    t1yrng = [250, 750] # Set varying spawn Y location
     t2yrng = t1yrng
     # USER INIT
     
-    masks = tu.ArenaMasks(game.arena)
-    nav_matrix = masks.obstacles_dil.copy()
-    nav_matrix[np.where(nav_matrix > 0)] = np.inf
-    nav_matrix += 1
-    nav_matrix = nav_matrix.astype(np.float32)
+    masks = tu.ArenaMasks(game.arena, nav_margin=35)
     static_state = np.zeros((100,100,3))
     static_state[:,:,0] = masks.obstacles_bin
     static_state[:,:,1] = masks.capture_area_mask
+    # Create actor-critic agents
     agent1 = ActorCriticAgent(static_state,5e-6)
     agent2 = ActorCriticAgent(static_state,5e-6)
-    #agent1.load_weights("Clicker_blue2")
+    # Load pretrained nets (you can comment these out to start fresh)
     agent1.load_model(NET1_DIR)
     agent2.load_model(NET2_DIR)
-
     running_reward = 0
 
-    # END USER INIT
-    
+    # Main loop
     while not game.quit_flag:
         t1 = [(100,round(random.uniform(t1yrng[0],t1yrng[1])), 180)]
         t2 = [(WIDTH-100,round(random.uniform(t2yrng[0],t2yrng[1])) , 180)]
@@ -303,11 +332,11 @@ def main():
                         team_2_spawn_list=t2,
                         target_capture_time=5,
                         tank_scale=1)
-        # Debug
+        # Set flags
         game.render_antennas_flag = False 
         game.manual_input_flag = True
         game.team_2_list[0].manual_control_flag = True
-        # USER ROUND INIT
+        # Create controller objects
         static_state[:,:,2] = get_game_state(game, masks, 1)
         red_controller = tu.AIController(masks, 
                                           game.team_2_list[0],
@@ -321,46 +350,46 @@ def main():
         episode_reward = 0
         tic = 1
         round_tic = 0
-        #path = t2[0:1] 
-        # END USER ROUND INIT
         valid_click1 = False
         valid_click2 = False
         e = 0
         
+        # Individual round loop
         while game.round_run_flag:
             with tf.GradientTape(persistent=True) as tape:
                 game.get_delta_time()
                 game.check_and_handle_events()
                 # -------------------------------------------------------
                 # INPUT game.inputAI()
-                tic += game.dt
-                round_tic += game.dt
-                #state = get_game_state(game, masks, 1)
+                tic += game.dt # To time controller updates
+                round_tic += game.dt # For timeout
                 if tic > T_UPDATE:
+                    # Get tank positions and compile appropriate matrices
                     state1 = get_game_state(game, masks, 1)
                     state2 = get_game_state(game, masks, 2)
-
+                    # Get predictions/actions with agents
                     xy1, log_prob1, critic_value1 = agent1.get_action_value(state1)
                     xy2, log_prob2, critic_value2 = agent2.get_action_value(state2)
-                    #xy2, log_prob2, critic_value2 = xy1, log_prob1, critic_value1
-                    tf.print(xy1, log_prob1, critic_value1)
-                    
+                    # if xy action was plausible, plan path and set controller
                     if check_valid_click(masks, xy1) is True:
-                        path = blue_controller.plan_path_astar(nav_matrix, xy1)
+                        tf.print(xy1, log_prob1, critic_value1)
+                        path = blue_controller.plan_path_astar(
+                                                    masks.nav_matrix, xy1)
                         blue_controller.set_waypoints(path[1:,:])
                         valid_click1 = True
                     else:
                         valid_click1 = False
 
                     if check_valid_click(masks, xy2) is True:
-                        path = red_controller.plan_path_astar(nav_matrix, xy2)
+                        path = red_controller.plan_path_astar(
+                                                    masks.nav_matrix, xy2)
                         red_controller.set_waypoints(path[1:,:])
                         valid_click2 = True
                     else:
                         valid_click2 = False
-
+                # Push action values to the tank itself
                 blue_controller.controls_output()
-                #red_controller.controls_output()
+                red_controller.controls_output() #Comment this for manual control
                 # -------------------------------------------------------
                 game.update()
                 game.draw_background()
@@ -369,27 +398,24 @@ def main():
                 # Place to draw on top of tanks
                 game.update_frame()
                 game.check_state()
-                
                 # -------------------------------------------------------
                 #  OUTPUT
-                if(round_tic>30):
-                    game._win_team=0
+                if(round_tic>30): # Round timeout -- tanks got stuck probably
+                    game._win_team=0 # end with tie
                 if tic > T_UPDATE:
                     tic = 0
+                    #Get rewards based on last actions
                     reward1 = get_reward(game, valid_click1, team=1)
                     reward2 = get_reward(game, valid_click2, team=2)
-
+                    #Append probabilites, critic values and rewards to memory
                     agent1.memorize(log_prob1, critic_value1, reward1)
                     agent2.memorize(log_prob2, critic_value2, reward2)
-
                     e+=1
                     if(e>BATCH):
-                        #agent1.learn(tape)
-                        #agent2.learn(tape)
+                        agent1.learn(tape) #Comment these out 
+                        agent2.learn(tape) #to stop agents updating
                         e=0
-
                     episode_reward += reward1
-                    #print("episode reward: ", episode_reward)
                 # -------------------------------------------------------
                 # print("FPS: ", (1/(game.last_millis/1000)))
             #Episode finished

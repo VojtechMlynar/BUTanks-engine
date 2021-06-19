@@ -1,7 +1,8 @@
 """
 BUTanks engine utility module
 
-contains various function used in the engine, mainly image manipulation
+contains various function used in the engine, mainly image manipulation, 
+path planning and waypoint following controller
 """
 import pyastar2d
 import pygame
@@ -16,7 +17,7 @@ def string_pulling(path, environment):
 
     returns m x 2 numpy array of optimized path
     """
-    STRIDE=5 # Adjust this parameter to improve performance, or avoid errors
+    STRIDE=2 # Adjust this parameter to improve performance, or avoid errors
 
     path = path.astype(int)
 
@@ -197,12 +198,13 @@ def resize_image(im_src, new_w, new_h):
 
 class ArenaMasks():
     """Class to hold various masks of arena image """
-    def __init__(self, arena):
+    def __init__(self, arena, nav_margin=35):
         """Extract features from arena image
         
         arena -- game.Arena object handle
         """
-        NAV_MARGIN = 30 #[px] should be at least half width of tank sprite
+        #[px] should be at least half length of tank sprite
+        NAV_MARGIN = nav_margin 
         
         # Create binary mask of obstacels
         self.obstacles_bin = arena.alpha_arr.copy()
@@ -210,7 +212,6 @@ class ArenaMasks():
         self.obstacles_bin[np.where(self.obstacles_bin == 255)] = 1
         self.obstacles_bin = self.obstacles_bin.astype(np.float32)
         self.size = self.obstacles_bin.shape
-
         # Dilate image to get safety navigation margin
         size = arena.image.get_size()
         self.size_big = size
@@ -224,7 +225,12 @@ class ArenaMasks():
             (self.capture_area_mask > 250))] = 0
         self.capture_area_mask[np.where(
             (self.capture_area_mask > 10))] = 1
-
+        # Get navigation matrix for A*
+        self.nav_matrix = self.obstacles_dil.copy()
+        self.nav_matrix[np.where(self.nav_matrix > 0)] = np.inf
+        self.nav_matrix += 1
+        self.nav_matrix = self.nav_matrix.astype(np.float32)
+        # Copy some attributes from Arena object
         self.res_scale = arena.res_scale
         self.LOS_mask = arena.LOS_mask
 
@@ -322,7 +328,7 @@ class AIController():
             # Check if is stuck in a wall
             distcs = self.tank.ant_distances
             close = self.tank.h*0.6
-            id = np.array([0,1,9])
+            id = np.array([0,1,np.size(distcs)-1])
             if(np.min(distcs[id]) < close ):
                 controls[1] = -1
 
@@ -381,7 +387,7 @@ class AIController():
         else:
             return np.array([X0, Y0],ndmin=2) 
 
-    def draw_path(game, path, colour):
+    def draw_path(self, game, path, colour):
         """Draw lines on path coordinates
         
             game -- engine.Game class object handle
