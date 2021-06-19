@@ -28,9 +28,14 @@ from pathlib import Path
 import tanks_utility as tu
 
 # Game rendering
+# TARGET_FPS = 1000  # Set very high for non graphic learning (e.g. 10000)
+# RENDER_ALL_FRAMES = False  # Set False to render only target frames or None
+# TARGET_FRAME = 20  # Target frames to render (multiplies of this num)
+# FIXED_DT = 1/25  # None for graphic mode
+
 TARGET_FPS = 60  # Set very high for non graphic learning (e.g. 10000)
 RENDER_ALL_FRAMES = True  # Set False to render only target frames or None
-TARGET_FRAME = 100  # Target frames to render (multiplies of this num)
+TARGET_FRAME = 1  # Target frames to render (multiplies of this num)
 FIXED_DT = None  # None for graphic mode
 
 # Convenient EXAMPLES:----------------------------------------------------------
@@ -56,7 +61,7 @@ MAP_BACKGROUND_COLOR = (100, 100, 100)
 TARGET_CAPTURE_TIME = 5  # Time that must be spent in the capture area [s]
 
 # Tank settings
-FORWARD_SPEED = 150      # [px/s]
+FORWARD_SPEED = 100      # [px/s]
 BACKWARD_SPEED = 80      # [px/s]
 TURN_SPEED = 150         # [deg/s]
 TURRET_TURN_SPEED = 200  # [deg/s]
@@ -588,6 +593,8 @@ class Tank(pygame.sprite.Sprite):
         # Initial positions
         self.x = pos0_x
         self.y = pos0_y
+        self._spawn_x = pos0_x
+        self._spawn_y = pos0_y
         self.phi = phi0
         self.phi_rel = phi_rel0
         # Properties
