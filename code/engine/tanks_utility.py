@@ -1,11 +1,13 @@
 """
 BUTanks engine utility module
 
-contains various function used in the engine, mainly image manipulation
+contains various function used in the engine, mainly image manipulation, 
+path planning and waypoint following controller
 """
-
+import pyastar2d
+import pygame
+import math
 import numpy as np
-
 
 def string_pulling(path, environment):
     """Straighten path from grid to account for non-grid movement
@@ -15,6 +17,8 @@ def string_pulling(path, environment):
 
     returns m x 2 numpy array of optimized path
     """
+    STRIDE=2 # Adjust this parameter to improve performance, or avoid errors
+
     path = path.astype(int)
 
     start = 0 # starting node
@@ -25,7 +29,7 @@ def string_pulling(path, environment):
     opt_path = np.array(path[0,], ndmin=2)
     while k < n:
         if has_LOS(path[start,0], path[start,1], 
-                path[k,0], path[k,1], environment) is False:
+                path[k,0], path[k,1], environment,stride=STRIDE) is False:
             opt_path = np.append(opt_path, np.atleast_2d(path[k-1]), 0)
             start = k
         k += 1
@@ -33,8 +37,6 @@ def string_pulling(path, environment):
     opt_path = np.append(opt_path, np.atleast_2d(path[-1,]), 0)
 
     return opt_path    
-
-
 
 def has_LOS(x0, y0, xt, yt, environment, stride = 1):
     """Check if [x0, y0] has line of sight to [xt, yt]
@@ -193,3 +195,205 @@ def resize_image(im_src, new_w, new_h):
             resize_im[W][H] = original_image[new_width][new_height]
     
     return resize_im
+
+class ArenaMasks():
+    """Class to hold various masks of arena image """
+    def __init__(self, arena, nav_margin=35):
+        """Extract features from arena image
+        
+        arena -- game.Arena object handle
+        """
+        #[px] should be at least half length of tank sprite
+        NAV_MARGIN = nav_margin 
+        
+        # Create binary mask of obstacels
+        self.obstacles_bin = arena.alpha_arr.copy()
+        self.obstacles_bin[np.where(self.obstacles_bin < 255)] = 0
+        self.obstacles_bin[np.where(self.obstacles_bin == 255)] = 1
+        self.obstacles_bin = self.obstacles_bin.astype(np.float32)
+        self.size = self.obstacles_bin.shape
+        # Dilate image to get safety navigation margin
+        size = arena.image.get_size()
+        self.size_big = size
+        dil = math.ceil(NAV_MARGIN / arena.res_scale[0])
+        self.obstacles_dil = dilate_image(self.obstacles_bin, dil, "max")
+        self.dilated_scaled = resize_image(self.obstacles_dil, 
+                                              size[0], size[1])
+        # Extract capture area
+        self.capture_area_mask = arena.alpha_arr.copy()
+        self.capture_area_mask[np.where(
+            (self.capture_area_mask > 250))] = 0
+        self.capture_area_mask[np.where(
+            (self.capture_area_mask > 10))] = 1
+        # Get navigation matrix for A*
+        self.nav_matrix = self.obstacles_dil.copy()
+        self.nav_matrix[np.where(self.nav_matrix > 0)] = np.inf
+        self.nav_matrix += 1
+        self.nav_matrix = self.nav_matrix.astype(np.float32)
+        # Copy some attributes from Arena object
+        self.res_scale = arena.res_scale
+        self.LOS_mask = arena.LOS_mask
+
+class AIController():
+    """AI controller class
+    
+        attributes:
+            waypoints -- numpy array n x 2 of waypoints
+            tank -- handle for tank object
+            enemy -- handle for adversary tank object
+            toothless -- parameter to determine whether tank will/won't
+                         shoot at the enemy tank
+        methods:
+            __init__ -- assign tank handle for controller
+
+            set_waypoints(path) -- provide new path (numpy array) 
+                                   for controller
+
+            controls_output -- control assigned tank to move to the waypoint
+                with highest priority. Returns controls vector
+
+            plan_path_astar -- Plan cheapest path through weights array with A*
+
+            draw_path -- draw provided path
+    """
+    def __init__(self, masks: ArenaMasks,
+                       tank,
+                       enemy,
+                       toothless=False):
+        """Init AI_controller Class
+        
+            arguments:
+                masks -- ArenaMasks object handle
+                tank -- engine.Tank object handle (self)
+                enemy -- engine.Tank object handle (adversarial tank)
+                toothless -- bool: True-> will shoot at the enemy
+                                   False-> will not shoot at the enemy
+        """
+        self.waypoints = np.array([tank.x, tank.y],ndmin=2)
+        self.tank = tank
+        self.enemy = enemy
+        self.masks = masks
+        self.toothless = toothless
+        
+    def set_waypoints(self, path):
+        """Set waypoints attribute macro
+        
+        path -- numpy array of (2 x n) dimension, integer dtype
+        """
+        self.waypoints = path
+
+    def controls_output(self):
+        """Path following get actions 
+        
+            Output: List of integers in format:
+                    [0]: body rotation 1/0/-1
+                    [1]: body forward/backwards movement 1/0/-1
+                    [2]: turret rotation 1/0/-1
+                    [3]: shoot 1/0
+        """
+        controls = [0, 0, 0, 0]
+        phi_rad = math.radians(self.tank.phi)
+        x = round(self.tank.x)
+        y = round(self.tank.y)
+        x_e = round(self.enemy.x)
+        y_e = round(self.enemy.y)
+
+        waypoints_left = np.size(self.waypoints,0) 
+
+        if waypoints_left > 0:
+            target = self.waypoints[0,]
+            waypoint_dist = abs(target[0]-x)\
+                          + abs(target[1]-y)
+            if waypoint_dist < 20:
+                self.waypoints = np.delete(self.waypoints, 0, 0)
+            else:
+                phi_tar = np.math.atan2((target[0]-x), (target[1]-y))
+                phi_err =  phi_rad - phi_tar
+                if (phi_err > np.pi*2) | (phi_err < 0):
+                    phi_err = phi_err - 2*np.pi*(phi_err // (2*np.pi))
+                # Turn towards the waypoint
+                if (phi_err < (2*np.pi*0.99)) & (phi_err > (2*np.pi*0.01)):
+                    if phi_err > np.pi:
+                        controls[0] = 1
+                    elif phi_err <= np.pi:
+                        controls[0] = -1
+                else:
+                    controls[0] = 0
+                # Move forward if approximately facing waypoint
+                if (abs(phi_err) < np.pi/10) | (abs(phi_err) > np.pi*19/10):
+                    controls[1] = 1
+                else:
+                    controls[1] = 0
+
+            # Check if is stuck in a wall
+            distcs = self.tank.ant_distances
+            close = self.tank.h*0.6
+            id = np.array([0,1,np.size(distcs)-1])
+            if(np.min(distcs[id]) < close ):
+                controls[1] = -1
+
+        # Turret controls
+        tur_rad = math.radians(self.tank.phi + self.tank.phi_rel)
+        phi_tar = np.math.atan2((x_e-x), (y_e-y))
+        phi_err = tur_rad - phi_tar #+ np.pi
+        # saturate phi
+        if (phi_err > np.pi*2) | (phi_err < 0):
+            phi_err = phi_err - 2*np.pi*(phi_err // (2*np.pi))
+
+        if (phi_err < (2*np.pi*0.99)) & (phi_err > (2*np.pi*0.01)):
+            if phi_err > np.pi:
+                controls[2] = 1
+            elif phi_err <= np.pi:
+                controls[2] = -1
+        else:
+            if (has_LOS(x, y, x_e, y_e, self.masks.LOS_mask, 10) is True) \
+                    & (self.toothless is False):
+                controls[3] = 1 # shoot
+            else:
+                controls[3] = 0 # dont shoot
+
+        self.tank.input_AI(controls) # apply control to tank class
+        return controls
+
+    def plan_path_astar(self, weights, target, pullstring = True):
+        """Plan path through array with A*
+        
+        arena -- arena object handle
+        weights -- numpy array float32 of weighed grid (lowest value must be 1!)
+        target -- target coordinates
+        pullstring -- (default True) optimize path for non-grid movement
+                        by string pulling method 
+        """
+        arena = self.masks
+        tank = self.tank
+        X0 = round(tank.x/arena.res_scale[0])
+        Y0 = round(tank.y/arena.res_scale[1])
+
+        if (X0<0) | (Y0<0) | (X0>arena.size[0]) | (Y0>arena.size[1]):
+            return np.array([X0, Y0],ndmin=2)
+            
+        path = pyastar2d.astar_path(weights,
+            (X0, Y0), (target[0], target[1]), allow_diagonal = False)
+
+        if (path is not None):
+            path_scaled = path*arena.res_scale[0]\
+                        + math.floor(arena.res_scale[0]/2)
+            if pullstring is True:
+                path_optimal = string_pulling(path_scaled,
+                                              arena.dilated_scaled)
+                return path_optimal
+            else:
+                return path_scaled
+        else:
+            return np.array([X0, Y0],ndmin=2) 
+
+    def draw_path(self, game, path, colour):
+        """Draw lines on path coordinates
+        
+            game -- engine.Game class object handle
+            path -- numpy array of waypoints (n x 2)
+            colour -- tuple of line colour
+        """
+        for i in range(np.size(path,0)-1):
+            pygame.draw.line(game.WINDOW, colour, 
+                (path[i,]), (path[i+1,]), 2)
